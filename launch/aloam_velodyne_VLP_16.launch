@@ -14,9 +14,7 @@
 
     <node pkg="aloam_ekf_mapping" type="ascanRegistration" name="ascanRegistration" output="screen" />
 
-    <node pkg="aloam_ekf_mapping" type="alaserOdometry" name="alaserOdometry" output="screen" />
-
-    <node pkg="aloam_ekf_mapping" type="ekf_mapping" name="ekf_mapping" output="screen" />
+    <node pkg="aloam_ekf_mapping" type="ekf_mapping" name="ekf_mapping" output="screen"/>
 
     <arg name="rviz" default="true" />
     <group if="$(arg rviz)">

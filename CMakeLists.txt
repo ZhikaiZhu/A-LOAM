@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(aloam_ekf_mapping)
 
-set(CMAKE_BUILD_TYPE "Release")
+# launch-prefix="xterm -e gdb  --args "
+#set(CMAKE_BUILD_TYPE "Release")
+SET(CMAKE_BUILD_TYPE "RelWithDebInfo")
 set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+SET(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g -ggdb")
+SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "$ENV{CXXFLAGS} -O2 -g -w")
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
