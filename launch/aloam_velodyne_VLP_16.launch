@@ -11,6 +11,11 @@
 
     <param name="mapping_line_resolution" type="double" value="0.2"/>
     <param name="mapping_plane_resolution" type="double" value="0.4"/>
+    <param name="lidar_std" type="double" value="0.01"/>
+    <param name="gyro_noise" type="double" value="0.005"/>
+    <param name="gyro_bias_noise" type="double" value="4e-6"/>
+    <param name="acc_noise" type="double" value="0.01"/>
+    <param name="acc_bias_noise" type="double" value="0.0002"/>
 
     <node pkg="aloam_ekf_mapping" type="ascanRegistration" name="ascanRegistration" output="screen" />
 

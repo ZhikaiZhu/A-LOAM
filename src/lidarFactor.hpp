@@ -33,11 +33,11 @@ struct PriorFactor
 		Eigen::Quaternion<T> q_diff_ex = q_t_ex * ex_rotation_t.inverse();
 		Eigen::Matrix<T, 3, 1> vec = q_diff.vec();
 		for (size_t i = 0; i < 3; ++i) {
-            delta_x(i, 0) = vec(i, 0);
+            delta_x(i, 0) = T(2) * vec(i, 0);
         }
 		vec = q_diff_ex.vec();
 		for (size_t i = 0; i < 3; ++i) {
-            delta_x(i + 15, 0) = vec(i, 0);
+            delta_x(i + 15, 0) = T(2) * vec(i, 0);
         }
         for (size_t i = 3; i < 6; ++i) {
             delta_x(i, 0) = bg[i - 3] - (T)gyro_bias(i - 3);
@@ -85,8 +85,10 @@ struct PriorFactor
 struct LidarEdgeFactorEx
 {
 	LidarEdgeFactorEx(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_,
-					Eigen::Vector3d last_point_b_, double s_)
-		: curr_point(curr_point_), last_point_a(last_point_a_), last_point_b(last_point_b_), s(s_) {}
+					Eigen::Vector3d last_point_b_, double s_, double lidar_std)
+		: curr_point(curr_point_), last_point_a(last_point_a_), last_point_b(last_point_b_), s(s_) {
+			sqrt_info = (1.0 / lidar_std);
+		}
 
 	template <typename T>
 	bool operator()(const T *q, const T *t, const T *q_ex, const T *t_ex, T *residual) const
@@ -107,31 +109,34 @@ struct LidarEdgeFactorEx
 		Eigen::Matrix<T, 3, 1> nu = (lp - lpa).cross(lp - lpb);
 		Eigen::Matrix<T, 3, 1> de = lpa - lpb;
 
-		residual[0] = nu.x() / de.norm();
-		residual[1] = nu.y() / de.norm();
-		residual[2] = nu.z() / de.norm();
+		residual[0] = (T)sqrt_info * nu.x() / de.norm();
+		residual[1] = (T)sqrt_info * nu.y() / de.norm();
+		residual[2] = (T)sqrt_info * nu.z() / de.norm();
 
 		return true;
 	}
 
 	static ceres::CostFunction *Create(const Eigen::Vector3d curr_point_, const Eigen::Vector3d last_point_a_,
-									   const Eigen::Vector3d last_point_b_, const double s_)
+									   const Eigen::Vector3d last_point_b_, const double s_, const double lidar_std)
 	{
 		return (new ceres::AutoDiffCostFunction<
 				LidarEdgeFactorEx, 3, 4, 3, 4, 3>(
-			new LidarEdgeFactorEx(curr_point_, last_point_a_, last_point_b_, s_)));
+			new LidarEdgeFactorEx(curr_point_, last_point_a_, last_point_b_, s_, lidar_std)));
 	}
 
 	Eigen::Vector3d curr_point, last_point_a, last_point_b;
 	double s;
+	double sqrt_info;
 };
 
 struct LidarPlaneNormFactorEx
 {
 
 	LidarPlaneNormFactorEx(Eigen::Vector3d curr_point_, Eigen::Vector3d plane_unit_norm_,
-						 double negative_OA_dot_norm_) : curr_point(curr_point_), plane_unit_norm(plane_unit_norm_),
-														 negative_OA_dot_norm(negative_OA_dot_norm_) {}
+						 double negative_OA_dot_norm_, double lidar_std) : curr_point(curr_point_), 
+						 plane_unit_norm(plane_unit_norm_), negative_OA_dot_norm(negative_OA_dot_norm_) {
+		sqrt_info = (1.0 / lidar_std);
+	}
 
 	template <typename T>
 	bool operator()(const T *q, const T *t, const T *q_ex, const T *t_ex, T *residual) const
@@ -146,21 +151,22 @@ struct LidarPlaneNormFactorEx
 		point_w = q_i_l.inverse() * ((q_w_i * (q_i_l * cp + t_i_l) + t_w_i) - t_i_l);
 
 		Eigen::Matrix<T, 3, 1> norm(T(plane_unit_norm.x()), T(plane_unit_norm.y()), T(plane_unit_norm.z()));
-		residual[0] = norm.dot(point_w) + T(negative_OA_dot_norm);
+		residual[0] = (T)sqrt_info * (norm.dot(point_w) + T(negative_OA_dot_norm));
 		return true;
 	}
 
 	static ceres::CostFunction *Create(const Eigen::Vector3d curr_point_, const Eigen::Vector3d plane_unit_norm_,
-									   const double negative_OA_dot_norm_)
+									   const double negative_OA_dot_norm_, const double lidar_std)
 	{
 		return (new ceres::AutoDiffCostFunction<
 				LidarPlaneNormFactorEx, 1, 4, 3, 4, 3>(
-			new LidarPlaneNormFactorEx(curr_point_, plane_unit_norm_, negative_OA_dot_norm_)));
+			new LidarPlaneNormFactorEx(curr_point_, plane_unit_norm_, negative_OA_dot_norm_, lidar_std)));
 	}
 
 	Eigen::Vector3d curr_point;
 	Eigen::Vector3d plane_unit_norm;
 	double negative_OA_dot_norm;
+	double sqrt_info;
 };
 
 struct LidarEdgeFactor

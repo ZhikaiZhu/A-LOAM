@@ -163,6 +163,8 @@ Eigen::Quaterniond q_w_i_ekf_last(1, 0, 0, 0);
 Eigen::Vector3d t_w_i_ekf_last(0, 0, 0);
 
 const int iterNum = 2;
+double LIDAR_STD;
+double gyro_noise = 0.005, gyro_bias_noise = 4e-6, acc_noise = 0.01, acc_bias_noise = 0.0002;
 
 void initializeGravityAndBias() {
 	// Initialize gravity and gyro bias.
@@ -197,7 +199,7 @@ void initializeGravityAndBias() {
 	std::cout << "INIT ROTATION" << std::endl << q_w_i_ekf.toRotationMatrix() << std::endl;
 	std::cout << "INIT Bg" << std::endl << gyro_bias.transpose() << std::endl;
 
-	const double gyro_bias_cov = 1e-4, acc_bias_cov = 1e-2, velocity_cov = 0.25;
+	const double gyro_bias_cov = 1e-4, acc_bias_cov = 1e-2, velocity_cov = 0.025;
 	const double extrinsic_rotation_cov = 3.0462e-4, extrinsic_translation_cov = 1e-4;
 	
 	for (int i = 3; i < 6; ++i)
@@ -211,15 +213,14 @@ void initializeGravityAndBias() {
 	for (int i = 18; i < 21; ++i)
 		state_cov(i, i) = extrinsic_translation_cov;
 	
-	const double gyro_noise = 0.005, gyro_bias_noise = 4e-6, acc_noise = 0.01, acc_bias_noise = 0.0002;
 	continuous_noise_cov.block<3, 3>(0, 0) =
-    	Eigen::Matrix3d::Identity() * gyro_noise;
+    	Eigen::Matrix3d::Identity() * gyro_noise * gyro_noise;
 	continuous_noise_cov.block<3, 3>(3, 3) =
-		Eigen::Matrix3d::Identity() * gyro_bias_noise;
+		Eigen::Matrix3d::Identity() * gyro_bias_noise * gyro_bias_noise;
 	continuous_noise_cov.block<3, 3>(6, 6) =
-		Eigen::Matrix3d::Identity() * acc_noise;
+		Eigen::Matrix3d::Identity() * acc_noise * acc_noise;
 	continuous_noise_cov.block<3, 3>(9, 9) =
-		Eigen::Matrix3d::Identity() * acc_bias_noise;
+		Eigen::Matrix3d::Identity() * acc_bias_noise * acc_bias_noise;
 	return;
 }
 
@@ -338,7 +339,16 @@ void processModel(const double& time,
 	gyr_last = m_gyro;
 
 	// Propogate the state covariance matrix.
-	Eigen::Matrix<double, 21, 21> Q = G * continuous_noise_cov * G.transpose() * dtime;
+	Eigen::Matrix<double, 12, 12> discrete_noise_cov = Eigen::Matrix<double, 12, 12>::Zero();
+	discrete_noise_cov.block<3, 3>(0, 0) =
+    	continuous_noise_cov.block<3, 3>(0, 0) * dtime;
+	discrete_noise_cov.block<3, 3>(3, 3) =
+		continuous_noise_cov.block<3, 3>(3, 3) * dtime;
+	discrete_noise_cov.block<3, 3>(6, 6) =
+		continuous_noise_cov.block<3, 3>(6, 6) * dtime;
+	discrete_noise_cov.block<3, 3>(9, 9) =
+		continuous_noise_cov.block<3, 3>(9, 9) * dtime;
+	Eigen::Matrix<double, 21, 21> Q = G * discrete_noise_cov * G.transpose();
 	state_cov = Phi * state_cov * Phi.transpose() + Q;
 
 	Eigen::MatrixXd state_cov_fixed = (state_cov + state_cov.transpose()) / 2.0;
@@ -828,7 +838,7 @@ void process()
 					int laserCloudSurfStackNum = laserCloudSurfStack->points.size();
 
 					//ceres::LossFunction *loss_function = NULL;
-					ceres::LossFunction *loss_function = new ceres::HuberLoss(0.1);
+					ceres::LossFunction *loss_function = new ceres::HuberLoss(0.1 * (1.0 / LIDAR_STD) * (1.0 / LIDAR_STD));
 					ceres::LocalParameterization *q_parameterization =
 						new ceres::EigenQuaternionParameterization();
 					ceres::Problem::Options problem_options;
@@ -890,7 +900,7 @@ void process()
 								point_a = 0.1 * unit_direction + point_on_line;
 								point_b = -0.1 * unit_direction + point_on_line;
 
-								ceres::CostFunction *cost_function = LidarEdgeFactorEx::Create(curr_point, point_a, point_b, 1.0);
+								ceres::CostFunction *cost_function = LidarEdgeFactorEx::Create(curr_point, point_a, point_b, 1.0, LIDAR_STD);
 								problem.AddResidualBlock(cost_function, loss_function, param_imu_state, param_imu_state + 13, param_ex, param_ex + 4);
 								corner_num++;	
 							}							
@@ -955,7 +965,7 @@ void process()
 							Eigen::Vector3d curr_point(pointOri.x, pointOri.y, pointOri.z);
 							if (planeValid)
 							{
-								ceres::CostFunction *cost_function = LidarPlaneNormFactorEx::Create(curr_point, norm, negative_OA_dot_norm);
+								ceres::CostFunction *cost_function = LidarPlaneNormFactorEx::Create(curr_point, norm, negative_OA_dot_norm, LIDAR_STD);
 								problem.AddResidualBlock(cost_function, loss_function, param_imu_state, param_imu_state + 13, param_ex, param_ex + 4);
 								surf_num++;
 							}
@@ -1017,6 +1027,17 @@ void process()
 						for (int i = 0; i < v_param.size(); ++i) {
 							for (int j = 0; j < v_param.size(); ++j) {
 								covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered[i][j]);
+							}
+						}
+						// the error definition of eskf is different from ceresquaternionparameterization (by a factor of 2)
+						for (int j = 0; j < v_param.size(); ++j) {
+							for (int r = 0; r < 3; ++r) {
+								for (int c = 0; c < 3; ++ c) {
+									covariance_recovered[0][j][r * 3 + c] *= 2.0;
+									covariance_recovered[j][0][r * 3 + c] *= 2.0;
+									covariance_recovered[5][j][r * 3 + c] *= 2.0;
+									covariance_recovered[j][5][r * 3 + c] *= 2.0;
+								}
 							}
 						}
 						Eigen::Matrix<double, 21, 21> Pk_recovered = Eigen::Matrix<double, 21, 21>::Zero();
@@ -1243,6 +1264,12 @@ int main(int argc, char **argv)
 	float planeRes = 0;
 	nh.param<float>("mapping_line_resolution", lineRes, 0.4);
 	nh.param<float>("mapping_plane_resolution", planeRes, 0.8);
+	nh.param<double>("lidar_std", LIDAR_STD, 0.1);
+	nh.param<double>("gyro_noise", gyro_noise, 0.005);
+	nh.param<double>("gyro_bias_noise", gyro_bias_noise, 4e-6);
+	nh.param<double>("acc_noise", acc_noise, 0.01);
+	nh.param<double>("acc_bias_noise", acc_bias_noise, 0.0002);
+
 	printf("line resolution %f plane resolution %f \n", lineRes, planeRes);
 	downSizeFilterCorner.setLeafSize(lineRes, lineRes,lineRes);
 	downSizeFilterSurf.setLeafSize(planeRes, planeRes, planeRes);
