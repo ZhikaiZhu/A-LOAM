@@ -16,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   cv_bridge
   tf
+  pcl_ros
 )
 
 #find_package(Eigen3 REQUIRED)
@@ -30,6 +31,10 @@ include_directories(
   ${CERES_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS})
 
+list(APPEND SOURCE_FILES
+  ${PROJECT_SOURCE_DIR}/src/parameters.cpp
+)
+
 catkin_package(
   CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs
   DEPENDS EIGEN3 PCL 
@@ -37,18 +42,18 @@ catkin_package(
 )
 
 
-add_executable(ascanRegistration src/scanRegistration.cpp)
+add_executable(ascanRegistration src/scanRegistration.cpp ${SOURCE_FILES})
 target_link_libraries(ascanRegistration ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
-add_executable(alaserOdometry src/laserOdometry.cpp)
+add_executable(alaserOdometry src/laserOdometry.cpp ${SOURCE_FILES})
 target_link_libraries(alaserOdometry ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${CERES_LIBRARIES})
 
-add_executable(alaserMapping src/laserMapping.cpp)
+add_executable(alaserMapping src/laserMapping.cpp ${SOURCE_FILES})
 target_link_libraries(alaserMapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${CERES_LIBRARIES})
 
 add_executable(kittiHelper src/kittiHelper.cpp)
 target_link_libraries(kittiHelper ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 
-
-
+add_executable(mapViewer src/mapViewer.cpp)
+target_link_libraries(mapViewer ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 

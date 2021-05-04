@@ -55,14 +55,15 @@
 #include "aloam_velodyne/common.h"
 #include "aloam_velodyne/tic_toc.h"
 #include "lidarFactor.hpp"
+#include "aloam_velodyne/parameters.h"
+
+using namespace parameter;
 
 #define DISTORTION 0
 
 
 int corner_correspondence = 0, plane_correspondence = 0;
 
-constexpr double SCAN_PERIOD = 0.1;
-constexpr double DISTANCE_SQ_THRESHOLD = 25;
 constexpr double NEARBY_SCAN = 2.5;
 
 int skipFrameNum = 5;
@@ -73,6 +74,16 @@ double timeCornerPointsLessSharp = 0;
 double timeSurfPointsFlat = 0;
 double timeSurfPointsLessFlat = 0;
 double timeLaserCloudFullRes = 0;
+
+// The number of features
+int count = 0.0;
+double cornerPoints = 0.0;
+double cornerPointsLess = 0.0;
+double surfPoints = 0.0;
+double surfPointsLess = 0.0;  
+
+// Result save
+std::string RESULT_PATH;
 
 pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeCornerLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
 pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeSurfLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
@@ -186,9 +197,14 @@ void laserCloudFullResHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloud
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "laserOdometry");
-    ros::NodeHandle nh;
+    ros::NodeHandle nh("~");
+
+    parameter::readParameters(nh);
 
     nh.param<int>("mapping_skip_frame", skipFrameNum, 2);
+    RESULT_PATH = OUTPUT_FOLDER + "/lio.csv";
+    std::ofstream fout(RESULT_PATH, std::ios::out);
+    fout.close();
 
     printf("Mapping %d Hz \n", 10 / skipFrameNum);
 
@@ -273,6 +289,15 @@ int main(int argc, char **argv)
             {
                 int cornerPointsSharpNum = cornerPointsSharp->points.size();
                 int surfPointsFlatNum = surfPointsFlat->points.size();
+
+                // calculate the features
+                ++count;
+                cornerPoints += cornerPointsSharp->size();
+                cornerPointsLess += cornerPointsLessSharp->size();
+                surfPoints += surfPointsFlat->size();
+                surfPointsLess += surfPointsLessFlat->size();
+                printf("Odom corner and surf points size: %f %f %f %f \n", cornerPoints / count, cornerPointsLess / count, 
+                                                                           surfPoints / count, surfPointsLess / count); 
 
                 TicToc t_opt;
                 for (size_t opti_counter = 0; opti_counter < 2; ++opti_counter)
@@ -521,6 +546,20 @@ int main(int argc, char **argv)
             laserOdometry.pose.pose.position.z = t_w_curr.z();
             pubLaserOdometry.publish(laserOdometry);
 
+            std::ofstream lio_path_file(RESULT_PATH, std::ios::app);
+			lio_path_file.setf(std::ios::fixed, std::ios::floatfield);
+			lio_path_file.precision(10);
+			lio_path_file << laserOdometry.header.stamp.toSec() << " ";
+			lio_path_file.precision(5);
+			lio_path_file << laserOdometry.pose.pose.position.x << " "
+						  << laserOdometry.pose.pose.position.y << " "
+						  << laserOdometry.pose.pose.position.z << " "
+						  << laserOdometry.pose.pose.orientation.w << " "
+						  << laserOdometry.pose.pose.orientation.x << " "
+						  << laserOdometry.pose.pose.orientation.y << " "
+						  << laserOdometry.pose.pose.orientation.z << std::endl;
+			lio_path_file.close();
+
             geometry_msgs::PoseStamped laserPose;
             laserPose.header = laserOdometry.header;
             laserPose.pose = laserOdometry.pose.pose;
@@ -530,7 +569,7 @@ int main(int argc, char **argv)
             pubLaserPath.publish(laserPath);
 
             // transform corner features and plane features to the scan end point
-            if (0)
+            if (1)
             {
                 int cornerPointsLessSharpNum = cornerPointsLessSharp->points.size();
                 for (int i = 0; i < cornerPointsLessSharpNum; i++)

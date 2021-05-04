@@ -61,6 +61,10 @@
 #include "lidarFactor.hpp"
 #include "aloam_velodyne/common.h"
 #include "aloam_velodyne/tic_toc.h"
+#include "aloam_velodyne/map_viewer.hpp"
+#include "aloam_velodyne/parameters.h"
+
+using namespace parameter;
 
 
 int frameCount = 0;
@@ -85,6 +89,14 @@ const int laserCloudNum = laserCloudWidth * laserCloudHeight * laserCloudDepth; 
 int laserCloudValidInd[125];
 int laserCloudSurroundInd[125];
 
+// The number of features
+int cnt = 0.0;
+double cornerPoints = 0.0;
+double surfPoints = 0.0;
+
+// Result save
+std::string RESULT_PATH, PCD_PATH;
+
 // input: from odom
 pcl::PointCloud<PointType>::Ptr laserCloudCornerLast(new pcl::PointCloud<PointType>());
 pcl::PointCloud<PointType>::Ptr laserCloudSurfLast(new pcl::PointCloud<PointType>());
@@ -98,6 +110,7 @@ pcl::PointCloud<PointType>::Ptr laserCloudSurfFromMap(new pcl::PointCloud<PointT
 
 //input & output: points in one frame. local --> global
 pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr allRegisteredCloud(new pcl::PointCloud<PointType>());
 
 // points in every cube
 pcl::PointCloud<PointType>::Ptr laserCloudCornerArray[laserCloudNum];
@@ -549,6 +562,12 @@ void process()
 			downSizeFilterSurf.filter(*laserCloudSurfStack);
 			int laserCloudSurfStackNum = laserCloudSurfStack->points.size();
 
+			// calculate features
+			++cnt;
+			cornerPoints += laserCloudCornerStackNum;
+			surfPoints += laserCloudSurfStackNum;
+			printf("Map input (DS) corner and surf points size: %f %f \n", cornerPoints / cnt, surfPoints / cnt);
+
 			printf("map prepare time %f ms\n", t_shift.toc());
 			printf("map corner num %d  surf num %d \n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum);
 			if (laserCloudCornerFromMapNum > 10 && laserCloudSurfFromMapNum > 50)
@@ -826,7 +845,10 @@ void process()
 				for (int i = 0; i < 4851; i++)
 				{
 					laserCloudMap += *laserCloudCornerArray[i];
-					laserCloudMap += *laserCloudSurfArray[i];
+					laserCloudMap += *laserCloudSurfArray[i];			
+				}
+				if (SAVE_PCD_MAP) {
+					*allRegisteredCloud += laserCloudMap;
 				}
 				sensor_msgs::PointCloud2 laserCloudMsg;
 				pcl::toROSMsg(laserCloudMap, laserCloudMsg);
@@ -864,6 +886,20 @@ void process()
 			odomAftMapped.pose.pose.position.z = t_w_curr.z();
 			pubOdomAftMapped.publish(odomAftMapped);
 
+			std::ofstream loop_path_file(RESULT_PATH, std::ios::app);
+			loop_path_file.setf(std::ios::fixed, std::ios::floatfield);
+			loop_path_file.precision(10);
+			loop_path_file << odomAftMapped.header.stamp.toSec() << " ";
+			loop_path_file.precision(5);
+			loop_path_file << odomAftMapped.pose.pose.position.x << " "
+						   << odomAftMapped.pose.pose.position.y << " "
+						   << odomAftMapped.pose.pose.position.z << " "
+						   << odomAftMapped.pose.pose.orientation.w << " "
+						   << odomAftMapped.pose.pose.orientation.x << " "
+						   << odomAftMapped.pose.pose.orientation.y << " "
+						   << odomAftMapped.pose.pose.orientation.z << std::endl;
+			loop_path_file.close();
+
 			geometry_msgs::PoseStamped laserAfterMappedPose;
 			laserAfterMappedPose.header = odomAftMapped.header;
 			laserAfterMappedPose.pose = odomAftMapped.pose.pose;
@@ -895,15 +931,21 @@ void process()
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "laserMapping");
-	ros::NodeHandle nh;
+	ros::NodeHandle nh("~");
+
+	parameter::readParameters(nh);
 
 	float lineRes = 0;
 	float planeRes = 0;
-	nh.param<float>("mapping_line_resolution", lineRes, 0.4);
-	nh.param<float>("mapping_plane_resolution", planeRes, 0.8);
+	nh.param<float>("mapping_line_resolution", lineRes, 0.2);
+	nh.param<float>("mapping_plane_resolution", planeRes, 0.4);
 	printf("line resolution %f plane resolution %f \n", lineRes, planeRes);
 	downSizeFilterCorner.setLeafSize(lineRes, lineRes,lineRes);
 	downSizeFilterSurf.setLeafSize(planeRes, planeRes, planeRes);
+	RESULT_PATH = OUTPUT_FOLDER + "/lio_mapped.csv";
+	std::ofstream fout(RESULT_PATH, std::ios::out);
+	fout.close();
+	PCD_PATH = OUTPUT_FOLDER + "/map.pcd";
 
 	ros::Subscriber subLaserCloudCornerLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100, laserCloudCornerLastHandler);
 
@@ -934,6 +976,10 @@ int main(int argc, char **argv)
 	std::thread mapping_process{process};
 
 	ros::spin();
+
+	if (SAVE_PCD_MAP) {
+		write_pcd_file(PCD_PATH, allRegisteredCloud, false);
+	}
 
 	return 0;
 }

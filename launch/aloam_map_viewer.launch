@@ -1,0 +1,17 @@
+<launch>
+    
+    <param name="background_color" type="double" value="0.0" />
+    <param name="is_seed_origin" type="bool" value="true" />
+    <param name="intensity_scale" type="double" value="255.0" />
+    <param name="used_color" type="int" value="1" />
+    <param name="laser_visualization_size" type="double" value="0.5" />
+    <param name="refreshing_time_ms" type="int" value="10000" />
+    <param name="sleep_micro_second" type="int" value="100" />
+    <param name="output_path" type="string" value="/home/spc/output" />
+    <param name="window_height" type="int" value="960" />
+    <param name="window_width" type="int" value="540" />
+    <param name="show_gt" type="bool" value="false" />
+    
+    <node pkg="aloam_velodyne" type="mapViewer" name="mapViewer" output="screen" />
+
+</launch>

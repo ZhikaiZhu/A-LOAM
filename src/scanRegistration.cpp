@@ -53,20 +53,28 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
 
+#include "aloam_velodyne/parameters.h"
+
+using namespace parameter;
 using std::atan2;
 using std::cos;
 using std::sin;
 
-const double scanPeriod = 0.1;
 
 const int systemDelay = 0; 
 int systemInitCount = 0;
 bool systemInited = false;
-int N_SCANS = 0;
 float cloudCurvature[400000];
 int cloudSortInd[400000];
 int cloudNeighborPicked[400000];
 int cloudLabel[400000];
+
+// The number of features
+int count = 0.0;
+double cornerPoints = 0.0;
+double cornerPointsLess = 0.0;
+double surfPoints = 0.0;
+double surfPointsLess = 0.0;  
 
 bool comp (int i,int j) { return (cloudCurvature[i]<cloudCurvature[j]); }
 
@@ -79,8 +87,6 @@ ros::Publisher pubRemovePoints;
 std::vector<ros::Publisher> pubEachScan;
 
 bool PUB_EACH_LINE = false;
-
-double MINIMUM_RANGE = 0.1; 
 
 template <typename PointT>
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
@@ -236,7 +242,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         }
 
         float relTime = (ori - startOri) / (endOri - startOri);
-        point.intensity = scanID + scanPeriod * relTime;
+        point.intensity = scanID + SCAN_PERIOD * relTime;
         laserCloudScans[scanID].push_back(point); 
     }
     
@@ -294,7 +300,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
                 int ind = cloudSortInd[k]; 
 
                 if (cloudNeighborPicked[ind] == 0 &&
-                    cloudCurvature[ind] > 0.1)
+                    cloudCurvature[ind] > EDGE_THRESHOLD)
                 {
 
                     largestPickedNum++;
@@ -349,7 +355,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
                 int ind = cloudSortInd[k];
 
                 if (cloudNeighborPicked[ind] == 0 &&
-                    cloudCurvature[ind] < 0.1)
+                    cloudCurvature[ind] < SURF_THRESHOLD)
                 {
 
                     cloudLabel[ind] = -1; 
@@ -401,11 +407,12 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         pcl::PointCloud<PointType> surfPointsLessFlatScanDS;
         pcl::VoxelGrid<PointType> downSizeFilter;
         downSizeFilter.setInputCloud(surfPointsLessFlatScan);
-        downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
+        downSizeFilter.setLeafSize(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
         downSizeFilter.filter(surfPointsLessFlatScanDS);
 
         surfPointsLessFlat += surfPointsLessFlatScanDS;
     }
+   
     printf("sort q time %f \n", t_q_sort);
     printf("seperate points time %f \n", t_pts.toc());
 
@@ -461,11 +468,9 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "scanRegistration");
-    ros::NodeHandle nh;
+    ros::NodeHandle nh("~");
 
-    nh.param<int>("scan_line", N_SCANS, 16);
-
-    nh.param<double>("minimum_range", MINIMUM_RANGE, 0.1);
+    parameter::readParameters(nh);
 
     printf("scan line number %d \n", N_SCANS);
 
@@ -475,7 +480,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 100, laserCloudHandler);
+    ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(LIDAR_TOPIC, 100, laserCloudHandler);
 
     pubLaserCloud = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
 
