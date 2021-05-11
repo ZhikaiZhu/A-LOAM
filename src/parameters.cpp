@@ -44,6 +44,7 @@ std::string LIDAR_TOPIC;
 
 std::string OUTPUT_FOLDER;
 int SAVE_PCD_MAP;
+int PURE_IMU;
 
 // !@KALMAN_FILTER
 double ACC_N;
@@ -103,6 +104,7 @@ void readParameters(ros::NodeHandle& n) {
   LIDAR_SCALE = fsSettings["lidar_scale"];
   LIDAR_STD = fsSettings["lidar_std"];
   SAVE_PCD_MAP = fsSettings["save_pcd_map"];
+  PURE_IMU = fsSettings["pure_imu"];
 
   fsSettings["imu_topic"] >> IMU_TOPIC;
   fsSettings["lidar_topic"] >> LIDAR_TOPIC;

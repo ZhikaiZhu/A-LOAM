@@ -9,6 +9,7 @@ minimum_range: 0.1
 edge_threshold: 0.1
 surf_threshold: 0.1
 distance_sq_threshold: 25
+skip_frame_num: 1
 icp_freq: 1
 max_lidar_nums: 200000
 num_iter: 15
@@ -19,12 +20,13 @@ use_ceres: 1
 loss_threshold: 0.1
 ceres_max_iter: 2
 save_pcd_map: 0
+pure_imu: 0
 
 # topic names
+imu_topic: "/lips_sim/data_imu"
+lidar_topic: "/lips_sim/data_cloud"
 #imu_topic: "/imu/data"
 #lidar_topic: "/velodyne_points"
-imu_topic: "/imu/data"
-lidar_topic: "/velodyne_points"
 output_path: "/home/spc/output"
 
 # noice parameters
@@ -43,7 +45,7 @@ init_vel_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.0, 0.0, 0.0]
+   data: [0.158, 0.158, 0.158]
 
 init_att_std: !!opencv-matrix
    rows: 3
@@ -55,13 +57,13 @@ init_acc_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.01, 0.01, 0.02]
+   data: [0.1, 0.1, 0.1]
       
 init_gyr_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.002, 0.002, 0.002]
+   data: [0.01, 0.01, 0.01]
   
 # initial IMU biases
 init_ba: !!opencv-matrix

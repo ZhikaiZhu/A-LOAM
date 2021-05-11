@@ -57,6 +57,8 @@ typedef Eigen::Quaterniond Q4D;
 
 namespace parameter {
 
+static double G0 = 9.81;
+
 // !@ENABLE_CALIBRATION
 extern int CALIBARTE_IMU;
 
@@ -82,6 +84,7 @@ extern std::string LIDAR_TOPIC;
 
 extern std::string OUTPUT_FOLDER;
 extern int SAVE_PCD_MAP;
+extern int PURE_IMU;
 
 // !@KALMAN_FILTER
 extern double ACC_N;

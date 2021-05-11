@@ -65,7 +65,7 @@
 #include "aloam_velodyne/parameters.h"
 
 using namespace parameter;
-
+using namespace utils;
 
 int frameCount = 0;
 

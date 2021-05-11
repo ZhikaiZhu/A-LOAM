@@ -3,10 +3,10 @@
     <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
     <param name="mapping_skip_frame" type="int" value="1" />
 
-    <param name="mapping_line_resolution" type="double" value="0.2"/>
-    <param name="mapping_plane_resolution" type="double" value="0.4"/>
+    <param name="mapping_line_resolution" type="double" value="0.4"/>
+    <param name="mapping_plane_resolution" type="double" value="0.8"/>
 
-    <!--- Config Path -->
+    <!-- Config Path -->
     <arg name="config_path" default="$(find aloam_velodyne)/config/params.yaml" />
     
     <node pkg="aloam_velodyne" type="ascanRegistration" name="ascanRegistration" output="screen">
