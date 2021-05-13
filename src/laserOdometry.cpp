@@ -62,7 +62,7 @@ using namespace parameter;
 using namespace utils;
 using namespace filter;
 
-#define DISTORTION 1
+#define DISTORTION 0
 
 
 constexpr double NEARBY_SCAN = 2.5;
@@ -714,7 +714,7 @@ void integrateTransformation() {
 void calculateRPfromIMU(const V3D& acc, double& roll, double& pitch) {
     pitch = -sign(acc.z()) * asin(acc.x() / G0);
     //roll = sign(acc.z()) * asin(acc.y() / G0);
-    roll = atan2(acc.y(), acc.z());
+    roll = atan(acc.y() / acc.z());
 }
 
 void correctRollPitch(const double &roll, const double &pitch) {
@@ -884,7 +884,7 @@ void performIESKF() {
             residual_(i) = LIDAR_SCALE * jacobians_->points[i].intensity;
 
             Hk_.block<1, 3>(i, GlobalState::att_) =
-                coff_xyz.transpose() * (-linState_.qbn_.toRotationMatrix() * skew(P2xyz)) * Rinvleft(-axis);
+                coff_xyz.transpose() * (-linState_.qbn_.toRotationMatrix() * skew(P2xyz));
             Hk_.block<1, 3>(i, GlobalState::pos_) =
                 coff_xyz.transpose() * M3D::Identity();
         }
@@ -928,6 +928,7 @@ void performIESKF() {
 
         // Update the state
         linState_.boxPlus(updateVec_, linState_);
+        //std::cout << linState_.rn_.transpose() << std::endl;
 
         updateVecNorm_ = updateVec_.norm();
         if (updateVecNorm_ <= 1e-2) {
@@ -1193,7 +1194,7 @@ int main(int argc, char **argv)
                         V3D imu_acc, imu_gyr;
                         imu_gyr << imu_msg->angular_velocity.x, imu_msg->angular_velocity.y, imu_msg->angular_velocity.z;
                         imu_acc << imu_msg->linear_acceleration.x, imu_msg->linear_acceleration.y, imu_msg->linear_acceleration.z;
-                        double dt = scan_time_ - imu_time;
+                        double dt = scan_time_ - last_imu_time_;
                         filter_->predict(dt, imu_acc, imu_gyr, true);
                         ++used_imu_msg;
                         break;
