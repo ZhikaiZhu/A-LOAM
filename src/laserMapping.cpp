@@ -282,7 +282,7 @@ void process()
 				timeLaserCloudSurfLast != timeLaserOdometry ||
 				timeLaserCloudFullRes != timeLaserOdometry)
 			{
-				printf("time corner %f surf %f full %f odom %f \n", timeLaserCloudCornerLast, timeLaserCloudSurfLast, timeLaserCloudFullRes, timeLaserOdometry);
+				//printf("time corner %f surf %f full %f odom %f \n", timeLaserCloudCornerLast, timeLaserCloudSurfLast, timeLaserCloudFullRes, timeLaserOdometry);
 				printf("unsync messeage!");
 				mBuf.unlock();
 				break;
@@ -566,7 +566,7 @@ void process()
 			++cnt;
 			cornerPoints += laserCloudCornerStackNum;
 			surfPoints += laserCloudSurfStackNum;
-			printf("Map input (DS) corner and surf points size: %f %f \n", cornerPoints / cnt, surfPoints / cnt);
+			//printf("Map input (DS) corner and surf points size: %f %f \n", cornerPoints / cnt, surfPoints / cnt);
 
 			printf("map prepare time %f ms\n", t_shift.toc());
 			printf("map corner num %d  surf num %d \n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum);

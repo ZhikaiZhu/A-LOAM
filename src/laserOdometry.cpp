@@ -57,6 +57,7 @@
 #include "lidarFactor.hpp"
 #include "aloam_velodyne/parameters.h"
 #include "aloam_velodyne/filter_state.hpp"
+#include "aloam_velodyne/map_buffer.hpp"
 
 using namespace parameter;
 using namespace utils;
@@ -398,7 +399,7 @@ void findCorrespondingCornerFeatures(ScanPtr lastScan, ScanPtr newScan,
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
                 ceres::CostFunction *cost_function = LidarEdgeStateFactor::Create(curr_point, P1, P2, s, nominalState->rn_, 
-                                                                                  nominalState->qbn_, LIDAR_STD / s);
+                                                                                  nominalState->qbn_, LIDAR_STD / w);
                 problem->AddResidualBlock(cost_function, loss_function, para_error_state);
             }
         }
@@ -517,7 +518,8 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
 
             double w = 1.0;
             if (iterCount >= ICP_FREQ) {
-                w = 1 - 1.8 * fabs(res) / sqrt(P0.norm());
+                w = 1 - 1.8 * fabs(res) / 
+                              sqrt(sqrt(pointSel.x * pointSel.x + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
             }
 
             if (w > 0.1 && res != 0) {
@@ -538,7 +540,7 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
                 ceres::CostFunction *cost_function = LidarPlaneStateFactor::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
-                                                                                   nominalState->qbn_, LIDAR_STD / s);
+                                                                                   nominalState->qbn_, LIDAR_STD / w);
                 problem->AddResidualBlock(cost_function, loss_function, para_error_state);
             }
         }
@@ -582,8 +584,11 @@ bool calculateTransformation(ScanPtr lastScan, ScanPtr newScan,
         V3D P2xyz(keypoint.x, keypoint.y, keypoint.z);
         V3D coff_xyz(coeff.x, coeff.y, coeff.z);
 
-        double s =
-            (1.f / SCAN_PERIOD) * (keypoint.intensity - int(keypoint.intensity));
+        double s;
+        if (DISTORTION)
+            s = (1.f / SCAN_PERIOD) * (keypoint.intensity - int(keypoint.intensity));
+        else 
+            s = 1.0;
 
         V3D phi = Quat2axis(linState_.qbn_);
         // Rotation matrix from frame2 (new) to frame1 (last)
@@ -884,7 +889,7 @@ void performIESKF() {
             residual_(i) = LIDAR_SCALE * jacobians_->points[i].intensity;
 
             Hk_.block<1, 3>(i, GlobalState::att_) =
-                coff_xyz.transpose() * (-linState_.qbn_.toRotationMatrix() * skew(P2xyz));
+                coff_xyz.transpose() * (-linState_.qbn_.toRotationMatrix() * skew(P2xyz)) * Rinvleft(-axis);
             Hk_.block<1, 3>(i, GlobalState::pos_) =
                 coff_xyz.transpose() * M3D::Identity();
         }
@@ -980,7 +985,9 @@ void initializeGravityAndBias() {
     globalState_.setIdentity();
     linState_.setIdentity();
     Q4D q0 = Eigen::Quaterniond::FromTwoVectors(gravity_imu, -gravity);
-    linState_.qbn_ = q0;
+    globalState_.qbn_ = q0;
+    globalState_.bw_ = bw_init_;
+    linState_.bw_ = bw_init_;
     std::cout<< "System Initialization Succeeded !!!" << std::endl;
 }
 
@@ -1157,14 +1164,14 @@ int main(int argc, char **argv)
                 scan_time_ = timeLaserCloudFullRes;
                 scan_new_->setPointCloud(scan_time_, cornerPointsSharp, cornerPointsLessSharp, 
                                          surfPointsFlat, surfPointsLessFlat, laserCloudFullRes);
-                //kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
-                //kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
+                kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
+                kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
 
                 V3D p0, v0;
                 p0.setZero(), v0.setZero(), ba_init_.setZero();
-                Q4D q0 = linState_.qbn_;
+                Q4D q0;
+                q0.setIdentity();
                 filter_->initialization(scan_time_, p0, v0, q0, ba_init_, bw_init_);
-                globalState_ = GlobalState(p0, v0, q0, ba_init_, bw_init_);
                 
                 updatePointCloud();
 
@@ -1181,6 +1188,13 @@ int main(int argc, char **argv)
             if (systemInited && !is_first_scan)
             {
                 scan_time_ = timeLaserCloudFullRes;
+                mBuf.lock();
+                auto it = imuBuf.crbegin();
+                mBuf.unlock();
+                if ((*it)->header.stamp.toSec() < scan_time_) {
+                    continue;
+                }
+                
                 int used_imu_msg = 0;
                 mBuf.lock();
                 for (const auto &imu_msg: imuBuf) {
@@ -1196,7 +1210,6 @@ int main(int argc, char **argv)
                         imu_acc << imu_msg->linear_acceleration.x, imu_msg->linear_acceleration.y, imu_msg->linear_acceleration.z;
                         double dt = scan_time_ - last_imu_time_;
                         filter_->predict(dt, imu_acc, imu_gyr, true);
-                        ++used_imu_msg;
                         break;
                     }
 

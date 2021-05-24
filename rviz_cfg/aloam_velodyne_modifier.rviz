@@ -6,8 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /odometry1/odomPath1
-        - /odometry1/PointCloud21
+        - /odometry1
         - /mapping1
       Splitter Ratio: 0.5
     Tree Height: 520
@@ -29,7 +28,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: surround
+    SyncSource: ""
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -115,7 +114,7 @@ Visualization Manager:
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
-          Color: 255; 85; 0
+          Color: 0; 85; 255
           Enabled: true
           Head Diameter: 0.300000012
           Head Length: 0.200000003
@@ -165,7 +164,7 @@ Visualization Manager:
           Use Fixed Frame: true
           Use rainbow: true
           Value: false
-      Enabled: false
+      Enabled: true
       Name: odometry
     - Class: rviz/Group
       Displays:
@@ -658,19 +657,13 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        aft_mapped:
-          Value: true
-        camera_init:
-          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        camera_init:
-          aft_mapped:
-            {}
+        {}
       Update Interval: 0
       Value: true
   Enabled: true
