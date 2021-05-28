@@ -45,7 +45,7 @@ init_vel_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.158, 0.158, 0.158]
+   data: [0.15, 0.15, 0.15]
 
 init_att_std: !!opencv-matrix
    rows: 3

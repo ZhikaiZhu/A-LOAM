@@ -1090,6 +1090,28 @@ void Initialization(ros::NodeHandle &nh) {
     Qk_.setZero();
 }
 
+void swapScan() {
+    pcl::PointCloud<PointType>::Ptr laserCloudTemp = cornerPointsLessSharp;
+    cornerPointsLessSharp = scan_last_->cornerPointsLessSharp_;
+    scan_last_->cornerPointsLessSharp_ = laserCloudTemp;
+
+    laserCloudTemp = cornerPointsSharp;
+    cornerPointsSharp = scan_last_->cornerPointsSharp_;
+    scan_last_->cornerPointsSharp_ = laserCloudTemp;
+
+    laserCloudTemp = surfPointsLessFlat;
+    surfPointsLessFlat = scan_last_->surfPointsLessFlat_;
+    scan_last_->surfPointsLessFlat_ = laserCloudTemp;
+
+    laserCloudTemp = surfPointsFlat;
+    surfPointsFlat = scan_last_->surfPointsFlat_;
+    scan_last_->surfPointsFlat_ = laserCloudTemp;
+
+    laserCloudTemp = laserCloudFullRes;
+    laserCloudFullRes = scan_last_->laserCloudFullRes_;
+    scan_last_->laserCloudFullRes_ = laserCloudTemp;
+}
+
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "laserOdometry");
@@ -1175,7 +1197,7 @@ int main(int argc, char **argv)
                 
                 updatePointCloud();
 
-                scan_last_.swap(scan_new_);
+                swapScan();
                 scan_new_.reset(new Scan());
 
                 publishTopics();
@@ -1241,7 +1263,7 @@ int main(int argc, char **argv)
                  // transform corner features and plane features to the scan end point
                 updatePointCloud();
 
-                scan_last_.swap(scan_new_);
+                swapScan();
                 scan_new_.reset(new Scan());
 
                 // publish odometry
