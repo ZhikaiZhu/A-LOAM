@@ -57,7 +57,6 @@
 #include "lidarFactor.hpp"
 #include "aloam_velodyne/parameters.h"
 #include "aloam_velodyne/filter_state.hpp"
-#include "aloam_velodyne/map_buffer.hpp"
 
 using namespace parameter;
 using namespace utils;
@@ -207,10 +206,12 @@ void updatePointCloud() {
                        &scan_new_->laserCloudFullRes_->points[i]);
     }
 
-    if (cornerPointsLessSharpNum >= 5 && surfPointsLessFlatNum >= 20) {
+    /*if (cornerPointsLessSharpNum >= 5 && surfPointsLessFlatNum >= 20) {
         kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
         kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
-    }
+    } */
+    kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
+    kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
 }
 
 void publishTopics() {
@@ -518,7 +519,7 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
 
             double w = 1.0;
             if (iterCount >= ICP_FREQ) {
-                w = 1 - 1.8 * fabs(res) / 
+                w = 1 - 1.8 * fabs(res) /
                               sqrt(sqrt(pointSel.x * pointSel.x + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
             }
 
@@ -745,17 +746,18 @@ void performIESKF() {
         GlobalState nominalState = filterState;
         Eigen::Map<Eigen::Matrix<double, 18, 1>> errorState(para_error_state);
         ceres::Solver::Options options;
-        options.max_solver_time_in_seconds = 0.04;
+        options.max_solver_time_in_seconds = 0.05;
         options.max_num_iterations = CERES_MAX_ITER;
         options.linear_solver_type = ceres::DENSE_QR;
         Eigen::Matrix<double, 18, 1> last_errorState = errorState;
-        for (int iter = 0; iter < NUM_ITER / 2 && !hasConverged && !hasDiverged; iter++) {
+        for (int iter = 0; iter <= NUM_ITER / CERES_MAX_ITER && !hasConverged && !hasDiverged; iter++) {
             keypointSurfs_->clear();
             jacobianCoffSurfs_->clear();
             keypointCorns_->clear();
             jacobianCoffCorns_->clear();
 
             ceres::Problem problem;
+            problem.AddParameterBlock(para_error_state, 18);
             ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
             problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
             
@@ -816,31 +818,95 @@ void performIESKF() {
             filterState.qbn_ = q;
             filter_->update(filterState, Pk_);
         } 
-        else {       
-            ceres::Problem problem;
-            ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
-            problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
-            
-            if (!PURE_IMU) {
-                findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
-                                            jacobianCoffSurfs_, 10, &problem, &nominalState);
-                findCorrespondingCornerFeatures(scan_last_, scan_new_, keypointCorns_,
-                                                jacobianCoffCorns_, 10, &problem, &nominalState);
+        else {   
+            if (!EKF_UPDATE) {    
+                ceres::Problem problem;
+                problem.AddParameterBlock(para_error_state, 18);
+                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
+                
+                if (!PURE_IMU) {
+                    findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
+                                                jacobianCoffSurfs_, 10, &problem, &nominalState);
+                    findCorrespondingCornerFeatures(scan_last_, scan_new_, keypointCorns_,
+                                                    jacobianCoffCorns_, 10, &problem, &nominalState);
+                }
+                                                
+                ceres::Solver::Summary summary;
+                ceres::Solve(options, &problem, &summary);
+                ceres::Covariance::Options cov_options;
+                cov_options.algorithm_type = ceres::DENSE_SVD;
+                ceres::Covariance covariance(cov_options);
+                std::vector<std::pair<const double*, const double*> > covariance_blocks;
+                covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
+                covariance.Compute(covariance_blocks, &problem);
+                covariance.GetCovarianceBlock(para_error_state, para_error_state, Pk_.data());
+                enforceSymmetry(Pk_);
+                //nominalState.boxPlus(errorState, linState_);
+                nominalState.boxPlusInv(errorState, linState_);
+                filter_->update(linState_, Pk_);
             }
-                                            
-            ceres::Solver::Summary summary;
-            ceres::Solve(options, &problem, &summary);
-            ceres::Covariance::Options cov_options;
-            cov_options.algorithm_type = ceres::DENSE_SVD;
-            ceres::Covariance covariance(cov_options);
-            std::vector<std::pair<const double*, const double*> > covariance_blocks;
-            covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
-            covariance.Compute(covariance_blocks, &problem);
-            covariance.GetCovarianceBlock(para_error_state, para_error_state, Pk_.data());
-            enforceSymmetry(Pk_);
-            //nominalState.boxPlus(errorState, linState_);
-            nominalState.boxPlusInv(errorState, linState_);
-            filter_->update(linState_, Pk_);
+            else {
+                keypointSurfs_->clear();
+                jacobianCoffSurfs_->clear();
+                keypointCorns_->clear();
+                jacobianCoffCorns_->clear();
+
+                if (!PURE_IMU) {
+                    findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
+                                                jacobianCoffSurfs_, 10);
+                    findCorrespondingCornerFeatures(scan_last_, scan_new_, keypointCorns_,
+                                                    jacobianCoffCorns_, 10);
+                }
+
+                // Sum up jocobians and residuals
+                keypoints_->clear();
+                jacobians_->clear();
+                (*keypoints_) += (*keypointSurfs_);
+                (*keypoints_) += (*keypointCorns_);
+                (*jacobians_) += (*jacobianCoffSurfs_);
+                (*jacobians_) += (*jacobianCoffCorns_);
+
+                // Memery allocation
+                const int DIM_OF_MEAS = keypoints_->points.size();
+                Hk_.resize(DIM_OF_MEAS, DIM_OF_STATE);
+                Rk_.resize(DIM_OF_MEAS, DIM_OF_MEAS);
+                Kk_.resize(DIM_OF_STATE, DIM_OF_MEAS);
+                Py_.resize(DIM_OF_MEAS, DIM_OF_MEAS);
+                Pyinv_.resize(DIM_OF_MEAS, DIM_OF_MEAS);
+
+                Hk_.setZero();
+                V3D axis = Quat2axis(linState_.qbn_);
+                for (int i = 0; i < DIM_OF_MEAS; ++i) {
+                    // Point represented in 2-frame (e.g., the end frame) in a
+                    // xyz-convention
+                    V3D P2xyz(keypoints_->points[i].x, keypoints_->points[i].y, keypoints_->points[i].z);
+                    V3D coff_xyz(jacobians_->points[i].x, jacobians_->points[i].y, jacobians_->points[i].z);
+                
+                    Hk_.block<1, 3>(i, GlobalState::att_) =
+                        coff_xyz.transpose() * (-linState_.qbn_.toRotationMatrix() * skew(P2xyz)); // Rinvleft(-axis);
+                    Hk_.block<1, 3>(i, GlobalState::pos_) =
+                        coff_xyz.transpose() * M3D::Identity();
+                }
+
+                // Set the measurement covariance matrix
+                VXD cov = VXD::Zero(DIM_OF_MEAS);
+                for (int i = 0; i < DIM_OF_MEAS; ++i) {
+                    cov[i] = LIDAR_STD * LIDAR_STD;
+                }
+                Rk_ = cov.asDiagonal();
+
+                // Kalman filter update. Details can be referred to ROVIO
+                Py_ = Hk_ * Pk_ * Hk_.transpose() + Rk_;  // S = H * P * H.transpose() + R;
+                Pyinv_.setIdentity();                   // solve Ax=B
+                Py_.llt().solveInPlace(Pyinv_);
+                Kk_ = Pk_ * Hk_.transpose() * Pyinv_;  // K = P*H.transpose()*S.inverse()
+
+                IKH_ = Eigen::Matrix<double, 18, 18>::Identity() - Kk_ * Hk_;
+                Pk_ = IKH_ * Pk_ * IKH_.transpose() + Kk_ * Rk_ * Kk_.transpose();
+                enforceSymmetry(Pk_);
+                filter_->update(linState_, Pk_);
+            }
         }
         return;
     }
@@ -1186,8 +1252,8 @@ int main(int argc, char **argv)
                 scan_time_ = timeLaserCloudFullRes;
                 scan_new_->setPointCloud(scan_time_, cornerPointsSharp, cornerPointsLessSharp, 
                                          surfPointsFlat, surfPointsLessFlat, laserCloudFullRes);
-                kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
-                kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
+                //kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
+                //kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
 
                 V3D p0, v0;
                 p0.setZero(), v0.setZero(), ba_init_.setZero();

@@ -119,7 +119,7 @@ Visualization Manager:
           Head Diameter: 0.300000012
           Head Length: 0.200000003
           Length: 0.300000012
-          Line Style: Lines
+          Line Style: Billboards
           Line Width: 0.100000001
           Name: odomPath
           Offset:
@@ -176,7 +176,7 @@ Visualization Manager:
           Head Diameter: 0.300000012
           Head Length: 0.200000003
           Length: 0.300000012
-          Line Style: Lines
+          Line Style: Billboards
           Line Width: 0.0299999993
           Name: mappingPath
           Offset:

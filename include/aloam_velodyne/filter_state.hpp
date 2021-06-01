@@ -29,17 +29,6 @@ using namespace parameter;
 
 namespace filter {
 
-class ImuData {
-  public:
-    ImuData() = default;
-    ImuData(double time, const V3D &acc, const V3D & gyr): time(time), acc(acc), gyr(gyr) {}
-    ~ImuData() = default;
-
-    double time;
-    V3D acc;
-    V3D gyr;
-};
-
 class Scan {
   public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
