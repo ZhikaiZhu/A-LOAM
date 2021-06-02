@@ -177,51 +177,67 @@ struct LidarDistanceFactor
 
 struct PriorFactor
 {
-    PriorFactor(Eigen::Matrix<double, 18, 18> covariance) : covariance_(covariance) {}
+    PriorFactor(Eigen::Matrix<double, 24, 24> covariance_, Eigen::Quaterniond ex_rotation_, Eigen::Vector3d ex_translation_) 
+		: covariance(covariance_), ex_rotation(ex_rotation_), ex_translation(ex_translation_) {}
 
 	template <typename T>
-	bool operator()(const T *dx, T *residual) const
+	bool operator()(const T *dx, const T *q_ex, const T *t_ex, T *residual) const
 	{
-        Eigen::Matrix<T, 18, 1> delta_x;
+        Eigen::Quaternion<T> q_t_ex{q_ex[3], q_ex[0], q_ex[1], q_ex[2]};
+		Eigen::Quaternion<T> ex_rotation_t{T(ex_rotation.w()), T(ex_rotation.x()), T(ex_rotation.y()), T(ex_rotation.z())};
+		Eigen::Quaternion<T> q_diff_ex = q_t_ex * ex_rotation_t.inverse();
+		Eigen::Matrix<T, 3, 1> vec = q_diff_ex.vec();
+		
+		Eigen::Matrix<T, 24, 1> delta_x;
         for (size_t i = 0; i < 18; ++i) {
             delta_x(i, 0) = dx[i];
         }
-		Eigen::Matrix<double, 18, 18> tmp = Eigen::LLT<Eigen::Matrix<double, 18, 18>>(covariance_.inverse()).matrixL().transpose();
-		Eigen::Matrix<T, 18, 18> sqrt_info = tmp.cast<T>();
-        Eigen::Matrix<T, 18, 1> r = sqrt_info * delta_x;
+
+		for (size_t i = 18; i < 21; i++) {
+			delta_x(i, 0) = T(2) * vec(i - 18, 0);
+		}
+
+		for (size_t i = 21; i < 24; i++) {
+			delta_x(i , 0) = t_ex[i - 21] - T(ex_translation(i - 21));
+		}
+		Eigen::Matrix<double, 24, 24> tmp = Eigen::LLT<Eigen::Matrix<double, 24, 24>>(covariance.inverse()).matrixL().transpose();
+		Eigen::Matrix<T, 24, 24> sqrt_info = tmp.cast<T>();
+        Eigen::Matrix<T, 24, 1> r = sqrt_info * delta_x;
 		
-		for (size_t i = 0; i < 18; ++i) {
+		for (size_t i = 0; i < 24; ++i) {
 			residual[i] = r(i, 0);
 		}
 
 		return true;
 	}
 
-	static ceres::CostFunction *Create(const Eigen::Matrix<double, 18, 18> covariance)
+	static ceres::CostFunction *Create(const Eigen::Matrix<double, 24, 24> covariance_, const Eigen::Quaterniond ex_rotation_,
+									   const Eigen::Vector3d ex_translation_)
 	{
 		return (new ceres::AutoDiffCostFunction<
-				PriorFactor, 18, 18>(new PriorFactor(covariance)));
+				PriorFactor, 24, 18, 4, 3>(new PriorFactor(covariance_, ex_rotation_, ex_translation_)));
 	}
 
-    Eigen::Matrix<double, 18, 18> covariance_;
-    
+    Eigen::Matrix<double, 24, 24> covariance;
+    Eigen::Quaterniond ex_rotation;
+	Eigen::Vector3d ex_translation;
 };
 
-struct LidarEdgeStateFactor
+struct LidarEdgeStateFactorEx
 {
-	LidarEdgeStateFactor(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_,
-						 Eigen::Vector3d last_point_b_, double s_, Eigen::Vector3d rn_, Eigen::Quaterniond qbn_, double cov_)
+	LidarEdgeStateFactorEx(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_,
+						   Eigen::Vector3d last_point_b_, double s_, Eigen::Vector3d rn_, Eigen::Quaterniond qbn_, double cov_)
 		: curr_point(curr_point_), last_point_a(last_point_a_), last_point_b(last_point_b_), s(s_), rn(rn_), qbn(qbn_), cov(cov_) {}
 
 	template <typename T>
-	bool operator()(const T *dx, T *residual) const
+	bool operator()(const T *dx, const T *q_ex, const T *t_ex, T *residual) const
 	{
 		Eigen::Matrix<T, 3, 1> cp{T(curr_point.x()), T(curr_point.y()), T(curr_point.z())};
 		Eigen::Matrix<T, 3, 1> lpa{T(last_point_a.x()), T(last_point_a.y()), T(last_point_a.z())};
 		Eigen::Matrix<T, 3, 1> lpb{T(last_point_b.x()), T(last_point_b.y()), T(last_point_b.z())};
 
-        Eigen::Matrix<T, 3, 1> Tbl{T(INIT_TBL.x()), T(INIT_TBL.y()), T(INIT_TBL.z())};
-        Eigen::Quaternion<T> Rbl = INIT_RBL.cast<T>();
+       	Eigen::Matrix<T, 3, 1> t_b_l{t_ex[0], t_ex[1], t_ex[2]};
+        Eigen::Quaternion<T> q_b_l{q_ex[3], q_ex[0], q_ex[1], q_ex[2]};
 
         Eigen::Matrix<T, 18, 1> delta_x;
         for (size_t i = 0; i < 18; ++i) {
@@ -252,7 +268,7 @@ struct LidarEdgeStateFactor
         */
 
         Eigen::Matrix<T, 3, 1> t_last_curr = T(s) * nominal_rn;
-        Eigen::Matrix<T, 3, 1> lp = Rbl.inverse() * (q_last_curr * (Rbl * cp + Tbl) + t_last_curr - Tbl);
+        Eigen::Matrix<T, 3, 1> lp = q_b_l.inverse() * (q_last_curr * (q_b_l * cp + t_b_l) + t_last_curr - t_b_l);
 
 		Eigen::Matrix<T, 3, 1> nu = (lp - lpa).cross(lp - lpb);
 		Eigen::Matrix<T, 3, 1> de = lpa - lpb;
@@ -267,8 +283,8 @@ struct LidarEdgeStateFactor
                                        const Eigen::Vector3d rn_, const Eigen::Quaterniond qbn_, const double cov_)
 	{
 		return (new ceres::AutoDiffCostFunction<
-				LidarEdgeStateFactor, 1, 18>(
-			new LidarEdgeStateFactor(curr_point_, last_point_a_, last_point_b_, s_, rn_, qbn_, cov_)));
+				LidarEdgeStateFactorEx, 1, 18, 4, 3>(
+			new LidarEdgeStateFactorEx(curr_point_, last_point_a_, last_point_b_, s_, rn_, qbn_, cov_)));
 	}
 
 	Eigen::Vector3d curr_point, last_point_a, last_point_b;
@@ -278,24 +294,24 @@ struct LidarEdgeStateFactor
     double cov;
 };
 
-struct LidarPlaneStateFactor
+struct LidarPlaneStateFactorEx
 {
-	LidarPlaneStateFactor(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_, 
-                    	  Eigen::Vector3d last_point_b_, Eigen::Vector3d last_point_c_, 
-                    	  double s_, Eigen::Vector3d rn_, Eigen::Quaterniond qbn_, double cov_)
+	LidarPlaneStateFactorEx(Eigen::Vector3d curr_point_, Eigen::Vector3d last_point_a_, 
+                    	    Eigen::Vector3d last_point_b_, Eigen::Vector3d last_point_c_, 
+                    	    double s_, Eigen::Vector3d rn_, Eigen::Quaterniond qbn_, double cov_)
 		: curr_point(curr_point_), last_point_a(last_point_a_), last_point_b(last_point_b_), 
         last_point_c(last_point_c_), s(s_), rn(rn_), qbn(qbn_), cov(cov_) {}
 
 	template <typename T>
-	bool operator()(const T *dx, T *residual) const
+	bool operator()(const T *dx, const T *q_ex, const T *t_ex, T *residual) const
 	{
 		Eigen::Matrix<T, 3, 1> cp{T(curr_point.x()), T(curr_point.y()), T(curr_point.z())};
 		Eigen::Matrix<T, 3, 1> lpa{T(last_point_a.x()), T(last_point_a.y()), T(last_point_a.z())};
 		Eigen::Matrix<T, 3, 1> lpb{T(last_point_b.x()), T(last_point_b.y()), T(last_point_b.z())};
 		Eigen::Matrix<T, 3, 1> lpc{T(last_point_c.x()), T(last_point_c.y()), T(last_point_c.z())};
 
-        Eigen::Matrix<T, 3, 1> Tbl{T(INIT_TBL.x()), T(INIT_TBL.y()), T(INIT_TBL.z())};
-        Eigen::Quaternion<T> Rbl = INIT_RBL.cast<T>();
+        Eigen::Matrix<T, 3, 1> t_b_l{t_ex[0], t_ex[1], t_ex[2]};
+        Eigen::Quaternion<T> q_b_l{q_ex[3], q_ex[0], q_ex[1], q_ex[2]};
 
         Eigen::Matrix<T, 18, 1> delta_x;
         for (size_t i = 0; i < 18; ++i) {
@@ -326,7 +342,7 @@ struct LidarPlaneStateFactor
         */
 
         Eigen::Matrix<T, 3, 1> t_last_curr = T(s) * nominal_rn;
-        Eigen::Matrix<T, 3, 1> lp = Rbl.inverse() * (q_last_curr * (Rbl * cp + Tbl) + t_last_curr - Tbl);
+        Eigen::Matrix<T, 3, 1> lp = q_b_l.inverse() * (q_last_curr * (q_b_l * cp + t_b_l) + t_last_curr - t_b_l);
         Eigen::Matrix<T, 3, 1> M = (lpa - lpb).cross(lpa - lpc);
         residual[0] = ((lp - lpa).transpose() * M).norm() / (M.norm() * T(cov));
 		return true;
@@ -337,8 +353,8 @@ struct LidarPlaneStateFactor
                                        const double s_, const Eigen::Vector3d rn_, const Eigen::Quaterniond qbn_, const double cov_)
 	{
 		return (new ceres::AutoDiffCostFunction<
-				LidarPlaneStateFactor, 1, 18>(
-			new LidarPlaneStateFactor(curr_point_, last_point_a_, last_point_b_, last_point_c_, s_, rn_, qbn_, cov_)));
+				LidarPlaneStateFactorEx, 1, 18, 4, 3>(
+			new LidarPlaneStateFactorEx(curr_point_, last_point_a_, last_point_b_, last_point_c_, s_, rn_, qbn_, cov_)));
 	}
 
 	Eigen::Vector3d curr_point, last_point_a, last_point_b, last_point_c;

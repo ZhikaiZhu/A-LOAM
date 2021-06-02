@@ -21,7 +21,7 @@ loss_threshold: 0.5
 ceres_max_iter: 3
 save_pcd_map: 0
 pure_imu: 0
-ekf_update: 0
+#ekf_update: 0
 
 # topic names
 imu_topic: "/lips_sim/data_imu"

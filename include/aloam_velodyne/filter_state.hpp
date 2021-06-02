@@ -92,7 +92,7 @@ typedef std::shared_ptr<Scan> ScanPtr;
 class GlobalState {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  static constexpr unsigned int DIM_OF_STATE_ = 18;
+  static constexpr unsigned int DIM_OF_STATE_ = 24;
   static constexpr unsigned int DIM_OF_NOISE_ = 12;
   static constexpr unsigned int pos_ = 0;
   static constexpr unsigned int vel_ = 3;
@@ -100,6 +100,8 @@ class GlobalState {
   static constexpr unsigned int acc_ = 9;
   static constexpr unsigned int gyr_ = 12;
   static constexpr unsigned int gra_ = 15;
+  static constexpr unsigned int ex_att_ = 18;
+  static constexpr unsigned int ex_pos_ = 21;
 
   GlobalState() { setIdentity(); }
 
@@ -122,6 +124,8 @@ class GlobalState {
     ba_.setZero();
     bw_.setZero();
     gn_ << 0.0, 0.0, -G0;
+    q_ex_ = INIT_RBL;
+    t_ex_ = INIT_TBL;
   }
 
   // boxPlus operator
@@ -138,7 +142,7 @@ class GlobalState {
   }
 
   // boxPlus operator for InEKF
-  void boxPlusInv(const Eigen::Matrix<double, DIM_OF_STATE_, 1>& xk,
+  void boxPlusInv(const Eigen::Matrix<double, 18, 1>& xk,
                GlobalState& stateOut) {
     Q4D dq = axis2Quat(xk.template segment<3>(att_));
     stateOut.qbn_ = (dq * qbn_).normalized();
@@ -171,6 +175,8 @@ class GlobalState {
     this->ba_ = other.ba_;
     this->bw_ = other.bw_;
     this->gn_ = other.gn_;
+    this->q_ex_ = other.q_ex_;
+    this->t_ex_ = other.t_ex_;
 
     return *this;
   }
@@ -182,6 +188,8 @@ class GlobalState {
   V3D ba_;   // acceleartion bias
   V3D bw_;   // gyroscope bias
   V3D gn_;   // gravity
+  Q4D q_ex_;
+  V3D t_ex_;
 };
 
 class StatePredictor {
@@ -349,6 +357,8 @@ class StatePredictor {
     double pweba = pow(ACC_W, 2);
     double pwebg = pow(GYR_W, 2);
     V3D gra_cov(0.01, 0.01, 0.01);
+    V3D ex_rotation_cov(3.0462e-4, 3.0462e-4, 3.0462e-4);
+    V3D ex_translation_cov(1e-4, 1e-4, 1e-4);
 
     if (type == 0) {
       // Initialize using offline parameters
@@ -365,6 +375,10 @@ class StatePredictor {
           covGyr.asDiagonal();  // bg
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) =
           gra_cov.asDiagonal();  // gravity
+      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) =
+          ex_rotation_cov.asDiagonal();
+      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) =
+          ex_translation_cov.asDiagonal();
     } else if (type == 1) {
       // Inheritage previous covariance
       M3D vel_cov =
@@ -375,6 +389,10 @@ class StatePredictor {
           covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_);
       M3D gra_cov =
           covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_);
+      M3D ex_rotation_cov =
+          covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
+      M3D ex_translation_cov = 
+          covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
 
       covariance_.setZero();
       covariance_.block<3, 3>(GlobalState::pos_, GlobalState::pos_) =
@@ -386,6 +404,8 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::acc_, GlobalState::acc_) = acc_cov;
       covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_) = gyr_cov;
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) = gra_cov;
+      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
+      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
     }
 
     noise_.setZero();
@@ -415,6 +435,10 @@ class StatePredictor {
           covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_);
       M3D gra_cov =
           covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_);
+      M3D ex_rotation_cov =
+          covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
+      M3D ex_translation_cov = 
+          covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
 
       covariance_.setZero();
       covariance_.block<3, 3>(GlobalState::pos_, GlobalState::pos_) =
@@ -427,6 +451,8 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_) = gyr_cov;
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) =
           state_.qbn_.inverse() * gra_cov * state_.qbn_;
+      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
+      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
 
       state_.rn_.setZero();
       state_.vn_ = state_.qbn_.inverse() * state_.vn_;
