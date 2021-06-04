@@ -85,6 +85,7 @@ extern std::string LIDAR_TOPIC;
 extern std::string OUTPUT_FOLDER;
 extern int SAVE_PCD_MAP;
 extern int PURE_IMU;
+extern int CALIB_EXTRINSIC;
 //extern int EKF_UPDATE;
 
 // !@KALMAN_FILTER

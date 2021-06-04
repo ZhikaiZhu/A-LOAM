@@ -71,6 +71,8 @@ int skipFrameNum;
 bool systemInited = false;
 bool is_first_scan = true;
 int frameCount = 0;
+double opt_time = 0.0;
+double whole_odom_time = 0.0;
 
 double timeCornerPointsSharp = 0;
 double timeCornerPointsLessSharp = 0;
@@ -92,8 +94,8 @@ pcl::PointCloud<PointType>::Ptr surfPointsLessFlat(new pcl::PointCloud<PointType
 pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>());
 
 double para_error_state[18];
-//double para_ex[7] = {INIT_RBL.x(), INIT_RBL.y(), INIT_RBL.z(), INIT_RBL.w(), INIT_TBL.x(), INIT_TBL.y(), INIT_TBL.z()};
-double para_ex[7] = {0, 0, 0, 1, 0, 0, 0};
+double para_ex[7];
+//double para_ex[7] = {0, 0, 0, 1, 0, 0, 0};
 Eigen::Map<Eigen::Quaterniond> q_b_l(para_ex);  // from lidar to inertial
 Eigen::Map<Eigen::Vector3d> t_b_l(para_ex + 4);
 
@@ -143,6 +145,7 @@ pcl::PointCloud<PointType>::Ptr jacobianCoffCorns_;
 pcl::PointCloud<PointType>::Ptr jacobianCoffSurfs_;
 
 GlobalState globalState_;
+GlobalState globalStateLidar_;
 GlobalState linState_;
 Eigen::Matrix<double, GlobalState::DIM_OF_STATE_, 1> difVecLinInv_;
 Eigen::Matrix<double, GlobalState::DIM_OF_STATE_, 1> updateVec_;
@@ -221,7 +224,6 @@ void updatePointCloud() {
 void publishTopics() {
     TicToc t_pub;
     if (frameCount % skipFrameNum == 0) {
-        frameCount = 0;
 
         sensor_msgs::PointCloud2 laserCloudCornerLast2;
         pcl::toROSMsg(*scan_last_->cornerPointsLessSharp_, laserCloudCornerLast2);
@@ -247,13 +249,13 @@ void publishTopics() {
     laserOdometry.header.frame_id = "/camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = ros::Time().fromSec(scan_time_);
-    laserOdometry.pose.pose.orientation.x = globalState_.qbn_.x();
-    laserOdometry.pose.pose.orientation.y = globalState_.qbn_.y();
-    laserOdometry.pose.pose.orientation.z = globalState_.qbn_.z();
-    laserOdometry.pose.pose.orientation.w = globalState_.qbn_.w();
-    laserOdometry.pose.pose.position.x = globalState_.rn_[0];
-    laserOdometry.pose.pose.position.y = globalState_.rn_[1];
-    laserOdometry.pose.pose.position.z = globalState_.rn_[2];
+    laserOdometry.pose.pose.orientation.x = globalStateLidar_.qbn_.x();
+    laserOdometry.pose.pose.orientation.y = globalStateLidar_.qbn_.y();
+    laserOdometry.pose.pose.orientation.z = globalStateLidar_.qbn_.z();
+    laserOdometry.pose.pose.orientation.w = globalStateLidar_.qbn_.w();
+    laserOdometry.pose.pose.position.x = globalStateLidar_.rn_[0];
+    laserOdometry.pose.pose.position.y = globalStateLidar_.rn_[1];
+    laserOdometry.pose.pose.position.z = globalStateLidar_.rn_[2];
     pubLaserOdometry.publish(laserOdometry);
 
     geometry_msgs::PoseStamped laserPose;
@@ -263,7 +265,7 @@ void publishTopics() {
     laserPath.poses.push_back(laserPose);
     laserPath.header.frame_id = "/camera_init";
     pubLaserPath.publish(laserPath);
-    printf("publication time %f ms \n", t_pub.toc());
+    //printf("publication time %f ms \n", t_pub.toc());
 
     std::ofstream lio_path_file(RESULT_PATH, std::ios::app);
 	lio_path_file.setf(std::ios::fixed, std::ios::floatfield);
@@ -723,6 +725,11 @@ void integrateTransformation() {
     globalState_.t_ex_ = filterState.t_ex_;
 }
 
+void transformFromInertialToLidar(){
+    globalStateLidar_.qbn_ = q_b_l.inverse() * globalState_.qbn_ * q_b_l;
+    globalStateLidar_.rn_ = q_b_l.inverse() * (globalState_.qbn_ * t_b_l + globalState_.rn_ - t_b_l);
+}
+
 void calculateRPfromIMU(const V3D& acc, double& roll, double& pitch) {
     pitch = -sign(acc.z()) * asin(acc.x() / G0);
     //roll = sign(acc.z()) * asin(acc.y() / G0);
@@ -744,7 +751,6 @@ void performIESKF() {
     double residualNorm = 1e6;
     bool hasConverged = false;
     bool hasDiverged = false;
-    const unsigned int DIM_OF_STATE = GlobalState::DIM_OF_STATE_;
     if (USE_CERES) {
         for (size_t i = 0; i < 18; ++i) {
             para_error_state[i] = 0.0;
@@ -769,8 +775,10 @@ void performIESKF() {
             problem.AddParameterBlock(para_error_state, 18);
             problem.AddParameterBlock(para_ex, 4, q_parameterization);
             problem.AddParameterBlock(para_ex + 4, 3);
-            //problem.SetParameterBlockConstant(para_ex);
-            //problem.SetParameterBlockConstant(para_ex + 4);
+            if (!CALIB_EXTRINSIC) {
+                problem.SetParameterBlockConstant(para_ex);
+                problem.SetParameterBlockConstant(para_ex + 4);
+            }
             ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_, ex_rotation, ex_translation);
             problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
             
@@ -824,8 +832,15 @@ void performIESKF() {
 
         if (hasDiverged == true) {
             ROS_WARN("======Using ICP Method======");
-            q_b_l = INIT_RBL;
-            t_b_l = INIT_TBL;
+            // Reset extrinsic parameters
+            para_ex[0] = INIT_RBL.x();
+            para_ex[1] = INIT_RBL.y();
+            para_ex[2] = INIT_RBL.z();
+            para_ex[3] = INIT_RBL.w();
+            para_ex[4] = INIT_TBL.x();
+            para_ex[5] = INIT_TBL.y();
+            para_ex[6] = INIT_TBL.z();
+
             V3D t = filterState.rn_;
             Q4D q = filterState.qbn_;
             estimateTransform(scan_last_, scan_new_, t, q);
@@ -839,8 +854,10 @@ void performIESKF() {
             problem.AddParameterBlock(para_error_state, 18);
             problem.AddParameterBlock(para_ex, 4, q_parameterization);
             problem.AddParameterBlock(para_ex + 4, 3);
-            //problem.SetParameterBlockConstant(para_ex);
-            //problem.SetParameterBlockConstant(para_ex + 4);
+            if (!CALIB_EXTRINSIC) {
+                problem.SetParameterBlockConstant(para_ex);
+                problem.SetParameterBlockConstant(para_ex + 4);
+            }
             ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_, ex_rotation, ex_translation);
             problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
             
@@ -859,63 +876,73 @@ void performIESKF() {
             cov_options.algorithm_type = ceres::DENSE_SVD;
             ceres::Covariance covariance(cov_options);
             std::vector<std::pair<const double*, const double*> > covariance_blocks;
-            std::vector<const double*> v_param;
-            v_param.push_back(para_error_state);
-            v_param.push_back(para_ex);
-            v_param.push_back(para_ex + 4);
-            for (size_t i = 0; i < v_param.size(); ++i) {
-                for (size_t j = 0; j < v_param.size(); ++j) {
-                    covariance_blocks.push_back(std::make_pair(v_param[i], v_param[j]));
-                }
+            if (!CALIB_EXTRINSIC) {
+                covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
+                covariance.Compute(covariance_blocks, &problem);
+                Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered;
+                covariance.GetCovarianceBlockInTangentSpace(para_error_state, para_error_state, covariance_recovered.data());
+                Pk_.block<18, 18>(0, 0) = covariance_recovered;
             }
-            covariance.Compute(covariance_blocks, &problem);
+            else {
+                std::vector<const double*> v_param;
+                v_param.push_back(para_error_state);
+                v_param.push_back(para_ex);
+                v_param.push_back(para_ex + 4);
+                // covariance_blocks can't contain duplicates
+                for (size_t i = 0; i < v_param.size(); ++i) {
+                    for (size_t j = 0; j <= i; ++j) {
+                        covariance_blocks.push_back(std::make_pair(v_param[i], v_param[j]));
+                    }
+                }
+                covariance.Compute(covariance_blocks, &problem);
 
-            Eigen::Matrix<double, 18, 18> covariance_recovered_1;
-            std::vector<Eigen::Matrix<double, 18, 3>> covariance_recovered_2;
-            covariance_recovered_2.resize(v_param.size() - 1);
-            std::vector<Eigen::Matrix<double, 3, 18>> covariance_recovered_3;
-            covariance_recovered_3.resize(v_param.size() - 1);
-            std::vector<Eigen::Matrix<double, 3, 3>> covariance_recovered_4;
-            covariance_recovered_4.resize( (v_param.size() - 1) * (v_param.size() - 1) );
-            int k = 0;
-            for (size_t i = 0; i < v_param.size(); ++i) {
+                Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
+                std::vector<Eigen::Matrix<double, 18, 3, Eigen::RowMajor>> covariance_recovered_2;
+                covariance_recovered_2.resize(v_param.size() - 1);
+                std::vector<Eigen::Matrix<double, 3, 18, Eigen::RowMajor>> covariance_recovered_3;
+                covariance_recovered_3.resize(v_param.size() - 1);
+                std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> covariance_recovered_4;
+                covariance_recovered_4.resize( (v_param.size() - 1) * (v_param.size() - 1) );
+                int k = 0;
+                for (size_t i = 0; i < v_param.size(); ++i) {
+                    for (size_t j = 0; j < v_param.size(); ++j) {
+                        if (i == 0 && j == 0) {
+                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_1.data());
+                        }
+                        else if (i == 0 && j != 0) {
+                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_2[j - 1].data());
+                        }
+                        else if (i != 0 && j == 0) {
+                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_3[i - 1].data());
+                        }
+                        else {
+                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_4[k].data());
+                            k++;
+                        }
+                    }
+                }
                 for (size_t j = 0; j < v_param.size(); ++j) {
-                    if (i == 0 && j == 0) {
-                        covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_1.data());
-                    }
-                    else if (i == 0 && j != 0) {
-                        covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_2[j - 1].data());
-                    }
-                    else if (i != 0 && j == 0) {
-                        covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_3[i - 1].data());
+                    if (j == 0) {
+                        covariance_recovered_2[j] *= 2.0;
+                        covariance_recovered_3[j] *= 2.0;
+                        covariance_recovered_4[j] *= 4.0;
                     }
                     else {
-                        covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_4[k].data());
-                        k++;
+                        covariance_recovered_4[j] *= 2.0;
                     }
                 }
-            }
-            for (size_t j = 0; j < v_param.size(); ++j) {
-                if (j == 0) {
-                    covariance_recovered_2[j] *= 2.0;
-                    covariance_recovered_3[j] *= 2.0;
-                    covariance_recovered_4[j] *= 4.0;
+                Pk_.setZero();
+                Pk_.block<18, 18>(0, 0) = covariance_recovered_1;
+                for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
+                    Pk_.block<18, 3>(0, 18 + 3 * i) = covariance_recovered_2[i];
+                    Pk_.block<3, 18>(18 + 3 * i, 0) = covariance_recovered_3[i];
                 }
-                else {
-                    covariance_recovered_4[j] *= 2.0;
-                }
-            }
-            Pk_.setZero();
-            Pk_.block<18, 18>(0, 0) = covariance_recovered_1;
-            for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
-                Pk_.block<18, 3>(0, 18 + 3 * i) = covariance_recovered_2[i];
-                Pk_.block<3, 18>(18 + 3 * i, 0) = covariance_recovered_3[i];
-            }
-            k = 0;
-            for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
-                for (size_t j = 0; j < covariance_recovered_2.size(); ++j){
-                    Pk_.block<3, 3>(18 + 3 * i, 18 + 3 * j) = covariance_recovered_4[k];
-                    k++;
+                k = 0;
+                for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
+                    for (size_t j = 0; j < covariance_recovered_2.size(); ++j){
+                        Pk_.block<3, 3>(18 + 3 * i, 18 + 3 * j) = covariance_recovered_4[k];
+                        k++;
+                    }
                 }
             }
             enforceSymmetry(Pk_);
@@ -927,7 +954,7 @@ void performIESKF() {
         }
         return;
     }
-    for (int iter = 0; iter < NUM_ITER && !hasConverged && !hasDiverged; iter++) {
+    /*for (int iter = 0; iter < NUM_ITER && !hasConverged && !hasDiverged; iter++) {
         keypointSurfs_->clear();
         jacobianCoffSurfs_->clear();
         keypointCorns_->clear();
@@ -1043,7 +1070,7 @@ void performIESKF() {
         Pk_ = IKH_ * Pk_ * IKH_.transpose() + Kk_ * Rk_ * Kk_.transpose();
         enforceSymmetry(Pk_);
         filter_->update(linState_, Pk_);
-    }
+    } */
 }
 
 void initializeGravityAndBias() {
@@ -1066,6 +1093,7 @@ void initializeGravityAndBias() {
     G0 = gravity_imu.norm();
     V3D gravity = V3D(0.0, 0.0, -G0);
     globalState_.setIdentity();
+    globalStateLidar_.setIdentity();
     linState_.setIdentity();
     Q4D q0 = Eigen::Quaterniond::FromTwoVectors(gravity_imu, -gravity);
     globalState_.qbn_ = q0;
@@ -1171,6 +1199,14 @@ void Initialization(ros::NodeHandle &nh) {
     Gk_.setZero();
     Pk_.setZero();
     Qk_.setZero();
+
+    para_ex[0] = INIT_RBL.x();
+    para_ex[1] = INIT_RBL.y();
+    para_ex[2] = INIT_RBL.z();
+    para_ex[3] = INIT_RBL.w();
+    para_ex[4] = INIT_TBL.x();
+    para_ex[5] = INIT_TBL.y();
+    para_ex[6] = INIT_TBL.z();
 }
 
 void swapScan() {
@@ -1281,6 +1317,7 @@ int main(int argc, char **argv)
                 filter_->state_.t_ex_ = t_b_l;
                 
                 updatePointCloud();
+                transformFromInertialToLidar();
 
                 swapScan();
                 scan_new_.reset(new Scan());
@@ -1336,7 +1373,9 @@ int main(int argc, char **argv)
 
                 TicToc t_opt;
                 performIESKF();
-                printf("optimization time %f \n", t_opt.toc());
+
+                opt_time += t_opt.toc();
+                printf("optimization time %f ms \n", opt_time / (frameCount + 1));
 
                 integrateTransformation();
                 filter_->reset(1);
@@ -1347,15 +1386,19 @@ int main(int argc, char **argv)
 
                  // transform corner features and plane features to the scan end point
                 updatePointCloud();
+                transformFromInertialToLidar();
 
                 swapScan();
                 scan_new_.reset(new Scan());
 
+                whole_odom_time += t_whole.toc();
+                printf("whole odometry time %f ms +++++\n", whole_odom_time / (frameCount + 1));
+
                 // publish odometry
                 publishTopics();
 
-                if(t_whole.toc() > 100)
-                    ROS_WARN("odometry process over 100ms");
+                /*if(t_whole.toc() > 100)
+                    ROS_WARN("odometry process over 100ms"); */
 
             }
             frameCount++;
