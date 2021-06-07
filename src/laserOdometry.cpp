@@ -249,13 +249,13 @@ void publishTopics() {
     laserOdometry.header.frame_id = "/camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = ros::Time().fromSec(scan_time_);
-    laserOdometry.pose.pose.orientation.x = globalStateLidar_.qbn_.x();
-    laserOdometry.pose.pose.orientation.y = globalStateLidar_.qbn_.y();
-    laserOdometry.pose.pose.orientation.z = globalStateLidar_.qbn_.z();
-    laserOdometry.pose.pose.orientation.w = globalStateLidar_.qbn_.w();
-    laserOdometry.pose.pose.position.x = globalStateLidar_.rn_[0];
-    laserOdometry.pose.pose.position.y = globalStateLidar_.rn_[1];
-    laserOdometry.pose.pose.position.z = globalStateLidar_.rn_[2];
+    laserOdometry.pose.pose.orientation.x = globalState_.qbn_.x();
+    laserOdometry.pose.pose.orientation.y = globalState_.qbn_.y();
+    laserOdometry.pose.pose.orientation.z = globalState_.qbn_.z();
+    laserOdometry.pose.pose.orientation.w = globalState_.qbn_.w();
+    laserOdometry.pose.pose.position.x = globalState_.rn_[0];
+    laserOdometry.pose.pose.position.y = globalState_.rn_[1];
+    laserOdometry.pose.pose.position.z = globalState_.rn_[2];
     pubLaserOdometry.publish(laserOdometry);
 
     geometry_msgs::PoseStamped laserPose;
@@ -778,9 +778,13 @@ void performIESKF() {
             if (!CALIB_EXTRINSIC) {
                 problem.SetParameterBlockConstant(para_ex);
                 problem.SetParameterBlockConstant(para_ex + 4);
+                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
             }
-            ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_, ex_rotation, ex_translation);
-            problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
+            else {
+                ceres::CostFunction *prior_factor = PriorFactorEx::Create(Pk_, ex_rotation, ex_translation);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
+            }
             
             if (!PURE_IMU) {
                 findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
@@ -857,9 +861,13 @@ void performIESKF() {
             if (!CALIB_EXTRINSIC) {
                 problem.SetParameterBlockConstant(para_ex);
                 problem.SetParameterBlockConstant(para_ex + 4);
+                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
             }
-            ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_, ex_rotation, ex_translation);
-            problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
+            else {
+                ceres::CostFunction *prior_factor = PriorFactorEx::Create(Pk_, ex_rotation, ex_translation);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
+            }
             
             if (!PURE_IMU) {
                 findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
@@ -881,7 +889,7 @@ void performIESKF() {
                 covariance.Compute(covariance_blocks, &problem);
                 Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered;
                 covariance.GetCovarianceBlockInTangentSpace(para_error_state, para_error_state, covariance_recovered.data());
-                Pk_.block<18, 18>(0, 0) = covariance_recovered;
+                Pk_ = covariance_recovered;
             }
             else {
                 std::vector<const double*> v_param;
@@ -1332,12 +1340,12 @@ int main(int argc, char **argv)
             if (systemInited && !is_first_scan)
             {
                 scan_time_ = timeLaserCloudFullRes;
-                mBuf.lock();
+                /*mBuf.lock();
                 auto it = imuBuf.crbegin();
                 mBuf.unlock();
                 if ((*it)->header.stamp.toSec() < scan_time_) {
                     continue;
-                }
+                } */
                 
                 int used_imu_msg = 0;
                 mBuf.lock();

@@ -177,7 +177,39 @@ struct LidarDistanceFactor
 
 struct PriorFactor
 {
-    PriorFactor(Eigen::Matrix<double, 24, 24> covariance_, Eigen::Quaterniond ex_rotation_, Eigen::Vector3d ex_translation_) 
+    PriorFactor(Eigen::Matrix<double, 18, 18> covariance_) : covariance(covariance_) {}
+
+	template <typename T>
+	bool operator()(const T *dx, T *residual) const
+	{
+        Eigen::Matrix<T, 18, 1> delta_x;
+        for (size_t i = 0; i < 18; ++i) {
+            delta_x(i, 0) = dx[i];
+        }
+		Eigen::Matrix<double, 18, 18> tmp = Eigen::LLT<Eigen::Matrix<double, 18, 18>>(covariance.inverse()).matrixL().transpose();
+		Eigen::Matrix<T, 18, 18> sqrt_info = tmp.cast<T>();
+        Eigen::Matrix<T, 18, 1> r = sqrt_info * delta_x;
+		
+		for (size_t i = 0; i < 18; ++i) {
+			residual[i] = r(i, 0);
+		}
+
+		return true;
+	}
+
+	static ceres::CostFunction *Create(const Eigen::Matrix<double, 18, 18> covariance_)
+	{
+		return (new ceres::AutoDiffCostFunction<
+				PriorFactor, 18, 18>(new PriorFactor(covariance_)));
+	}
+
+    Eigen::Matrix<double, 18, 18> covariance;
+    
+};
+
+struct PriorFactorEx
+{
+    PriorFactorEx(Eigen::Matrix<double, 24, 24> covariance_, Eigen::Quaterniond ex_rotation_, Eigen::Vector3d ex_translation_) 
 		: covariance(covariance_), ex_rotation(ex_rotation_), ex_translation(ex_translation_) {}
 
 	template <typename T>
@@ -215,7 +247,7 @@ struct PriorFactor
 									   const Eigen::Vector3d ex_translation_)
 	{
 		return (new ceres::AutoDiffCostFunction<
-				PriorFactor, 24, 18, 4, 3>(new PriorFactor(covariance_, ex_rotation_, ex_translation_)));
+				PriorFactorEx, 24, 18, 4, 3>(new PriorFactorEx(covariance_, ex_rotation_, ex_translation_)));
 	}
 
     Eigen::Matrix<double, 24, 24> covariance;

@@ -27,6 +27,8 @@ using namespace std;
 using namespace utils;
 using namespace parameter;
 
+#define IS_CALIB_EX 0
+
 namespace filter {
 
 class Scan {
@@ -92,7 +94,7 @@ typedef std::shared_ptr<Scan> ScanPtr;
 class GlobalState {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  static constexpr unsigned int DIM_OF_STATE_ = 24;
+  static constexpr unsigned int DIM_OF_STATE_ = IS_CALIB_EX ? 24 : 18;
   static constexpr unsigned int DIM_OF_NOISE_ = 12;
   static constexpr unsigned int pos_ = 0;
   static constexpr unsigned int vel_ = 3;
@@ -374,11 +376,13 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_) =
           covGyr.asDiagonal();  // bg
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) =
-          gra_cov.asDiagonal();  // gravity
-      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) =
-          ex_rotation_cov.asDiagonal();
-      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) =
-          ex_translation_cov.asDiagonal();
+          gra_cov.asDiagonal();  // gravity     
+      if (IS_CALIB_EX) {
+        covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) =
+            ex_rotation_cov.asDiagonal();
+        covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) =
+            ex_translation_cov.asDiagonal();
+      }
     } else if (type == 1) {
       // Inheritage previous covariance
       M3D vel_cov =
@@ -389,10 +393,12 @@ class StatePredictor {
           covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_);
       M3D gra_cov =
           covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_);
-      M3D ex_rotation_cov =
-          covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
-      M3D ex_translation_cov = 
-          covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
+      M3D ex_rotation_cov = M3D::Zero();
+      M3D ex_translation_cov = M3D::Zero();
+      if (IS_CALIB_EX) {
+        ex_rotation_cov = covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
+        ex_translation_cov = covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
+      }
 
       covariance_.setZero();
       covariance_.block<3, 3>(GlobalState::pos_, GlobalState::pos_) =
@@ -404,8 +410,10 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::acc_, GlobalState::acc_) = acc_cov;
       covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_) = gyr_cov;
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) = gra_cov;
-      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
-      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
+      if (IS_CALIB_EX) {
+        covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
+        covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
+      }
     }
 
     noise_.setZero();
@@ -435,10 +443,12 @@ class StatePredictor {
           covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_);
       M3D gra_cov =
           covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_);
-      M3D ex_rotation_cov =
-          covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
-      M3D ex_translation_cov = 
-          covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
+      M3D ex_rotation_cov = M3D::Zero();
+      M3D ex_translation_cov = M3D::Zero();
+      if (IS_CALIB_EX) {
+        ex_rotation_cov = covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_);
+        ex_translation_cov = covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_);
+      }
 
       covariance_.setZero();
       covariance_.block<3, 3>(GlobalState::pos_, GlobalState::pos_) =
@@ -451,8 +461,10 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::gyr_, GlobalState::gyr_) = gyr_cov;
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) =
           state_.qbn_.inverse() * gra_cov * state_.qbn_;
-      covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
-      covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
+      if (IS_CALIB_EX) {
+        covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) = ex_rotation_cov;
+        covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) = ex_translation_cov;
+      }
 
       state_.rn_.setZero();
       state_.vn_ = state_.qbn_.inverse() * state_.vn_;
