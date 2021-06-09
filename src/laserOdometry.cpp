@@ -249,13 +249,13 @@ void publishTopics() {
     laserOdometry.header.frame_id = "/camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = ros::Time().fromSec(scan_time_);
-    laserOdometry.pose.pose.orientation.x = globalState_.qbn_.x();
-    laserOdometry.pose.pose.orientation.y = globalState_.qbn_.y();
-    laserOdometry.pose.pose.orientation.z = globalState_.qbn_.z();
-    laserOdometry.pose.pose.orientation.w = globalState_.qbn_.w();
-    laserOdometry.pose.pose.position.x = globalState_.rn_[0];
-    laserOdometry.pose.pose.position.y = globalState_.rn_[1];
-    laserOdometry.pose.pose.position.z = globalState_.rn_[2];
+    laserOdometry.pose.pose.orientation.x = globalStateLidar_.qbn_.x();
+    laserOdometry.pose.pose.orientation.y = globalStateLidar_.qbn_.y();
+    laserOdometry.pose.pose.orientation.z = globalStateLidar_.qbn_.z();
+    laserOdometry.pose.pose.orientation.w = globalStateLidar_.qbn_.w();
+    laserOdometry.pose.pose.position.x = globalStateLidar_.rn_[0];
+    laserOdometry.pose.pose.position.y = globalStateLidar_.rn_[1];
+    laserOdometry.pose.pose.position.z = globalStateLidar_.rn_[2];
     pubLaserOdometry.publish(laserOdometry);
 
     geometry_msgs::PoseStamped laserPose;
@@ -832,6 +832,88 @@ void performIESKF() {
             //nominalState.boxPlus(errorState, linState_);
             nominalState.boxPlusInv(errorState, linState_);
             last_errorState = errorState;
+
+            if (hasConverged || iter == NUM_ITER / CERES_MAX_ITER) {
+                ceres::Covariance::Options cov_options;
+                cov_options.algorithm_type = ceres::DENSE_SVD;
+                ceres::Covariance covariance(cov_options);
+                std::vector<std::pair<const double*, const double*> > covariance_blocks;
+                if (!CALIB_EXTRINSIC) {
+                    covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
+                    covariance.Compute(covariance_blocks, &problem);
+                    Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered;
+                    covariance.GetCovarianceBlockInTangentSpace(para_error_state, para_error_state, covariance_recovered.data());
+                    Pk_ = covariance_recovered;
+                }
+                else {
+                    std::vector<const double*> v_param;
+                    v_param.push_back(para_error_state);
+                    v_param.push_back(para_ex);
+                    v_param.push_back(para_ex + 4);
+                    // covariance_blocks can't contain duplicates
+                    for (size_t i = 0; i < v_param.size(); ++i) {
+                        for (size_t j = 0; j <= i; ++j) {
+                            covariance_blocks.push_back(std::make_pair(v_param[i], v_param[j]));
+                        }
+                    }
+                    covariance.Compute(covariance_blocks, &problem);
+
+                    Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
+                    std::vector<Eigen::Matrix<double, 18, 3, Eigen::RowMajor>> covariance_recovered_2;
+                    covariance_recovered_2.resize(v_param.size() - 1);
+                    std::vector<Eigen::Matrix<double, 3, 18, Eigen::RowMajor>> covariance_recovered_3;
+                    covariance_recovered_3.resize(v_param.size() - 1);
+                    std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> covariance_recovered_4;
+                    covariance_recovered_4.resize( (v_param.size() - 1) * (v_param.size() - 1) );
+                    int k = 0;
+                    for (size_t i = 0; i < v_param.size(); ++i) {
+                        for (size_t j = 0; j < v_param.size(); ++j) {
+                            if (i == 0 && j == 0) {
+                                covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_1.data());
+                            }
+                            else if (i == 0 && j != 0) {
+                                covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_2[j - 1].data());
+                            }
+                            else if (i != 0 && j == 0) {
+                                covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_3[i - 1].data());
+                            }
+                            else {
+                                covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_4[k].data());
+                                k++;
+                            }
+                        }
+                    }
+                    for (size_t j = 0; j < v_param.size(); ++j) {
+                        if (j == 0) {
+                            covariance_recovered_2[j] *= 2.0;
+                            covariance_recovered_3[j] *= 2.0;
+                            covariance_recovered_4[j] *= 4.0;
+                        }
+                        else {
+                            covariance_recovered_4[j] *= 2.0;
+                        }
+                    }
+                    Pk_.setZero();
+                    Pk_.block<18, 18>(0, 0) = covariance_recovered_1;
+                    for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
+                        Pk_.block<18, 3>(0, 18 + 3 * i) = covariance_recovered_2[i];
+                        Pk_.block<3, 18>(18 + 3 * i, 0) = covariance_recovered_3[i];
+                    }
+                    k = 0;
+                    for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
+                        for (size_t j = 0; j < covariance_recovered_2.size(); ++j){
+                            Pk_.block<3, 3>(18 + 3 * i, 18 + 3 * j) = covariance_recovered_4[k];
+                            k++;
+                        }
+                    }
+                }
+                enforceSymmetry(Pk_);
+                //nominalState.boxPlus(errorState, linState_);
+                nominalState.boxPlusInv(errorState, linState_);
+                filter_->update(linState_, Pk_);
+                filter_->state_.q_ex_ = q_b_l;
+                filter_->state_.t_ex_ = t_b_l;
+            }
         }
 
         if (hasDiverged == true) {
@@ -851,114 +933,6 @@ void performIESKF() {
             filterState.rn_ = t;
             filterState.qbn_ = q;
             filter_->update(filterState, Pk_);
-        } 
-        else {     
-            ceres::LocalParameterization *q_parameterization = new ceres::EigenQuaternionParameterization();
-            ceres::Problem problem;
-            problem.AddParameterBlock(para_error_state, 18);
-            problem.AddParameterBlock(para_ex, 4, q_parameterization);
-            problem.AddParameterBlock(para_ex + 4, 3);
-            if (!CALIB_EXTRINSIC) {
-                problem.SetParameterBlockConstant(para_ex);
-                problem.SetParameterBlockConstant(para_ex + 4);
-                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
-                problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
-            }
-            else {
-                ceres::CostFunction *prior_factor = PriorFactorEx::Create(Pk_, ex_rotation, ex_translation);
-                problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
-            }
-            
-            if (!PURE_IMU) {
-                findCorrespondingSurfFeatures(scan_last_, scan_new_, keypointSurfs_,
-                                            jacobianCoffSurfs_, 10, &problem, &nominalState);
-                findCorrespondingCornerFeatures(scan_last_, scan_new_, keypointCorns_,
-                                                jacobianCoffCorns_, 10, &problem, &nominalState);
-            }
-                                            
-            ceres::Solver::Summary summary;
-            ceres::Solve(options, &problem, &summary);
-            std::cout << "ex rotation: " << q_b_l.toRotationMatrix() << std::endl;
-            std::cout << "ex translation: " << t_b_l.transpose() << std:: endl;
-            ceres::Covariance::Options cov_options;
-            cov_options.algorithm_type = ceres::DENSE_SVD;
-            ceres::Covariance covariance(cov_options);
-            std::vector<std::pair<const double*, const double*> > covariance_blocks;
-            if (!CALIB_EXTRINSIC) {
-                covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
-                covariance.Compute(covariance_blocks, &problem);
-                Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered;
-                covariance.GetCovarianceBlockInTangentSpace(para_error_state, para_error_state, covariance_recovered.data());
-                Pk_ = covariance_recovered;
-            }
-            else {
-                std::vector<const double*> v_param;
-                v_param.push_back(para_error_state);
-                v_param.push_back(para_ex);
-                v_param.push_back(para_ex + 4);
-                // covariance_blocks can't contain duplicates
-                for (size_t i = 0; i < v_param.size(); ++i) {
-                    for (size_t j = 0; j <= i; ++j) {
-                        covariance_blocks.push_back(std::make_pair(v_param[i], v_param[j]));
-                    }
-                }
-                covariance.Compute(covariance_blocks, &problem);
-
-                Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
-                std::vector<Eigen::Matrix<double, 18, 3, Eigen::RowMajor>> covariance_recovered_2;
-                covariance_recovered_2.resize(v_param.size() - 1);
-                std::vector<Eigen::Matrix<double, 3, 18, Eigen::RowMajor>> covariance_recovered_3;
-                covariance_recovered_3.resize(v_param.size() - 1);
-                std::vector<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>> covariance_recovered_4;
-                covariance_recovered_4.resize( (v_param.size() - 1) * (v_param.size() - 1) );
-                int k = 0;
-                for (size_t i = 0; i < v_param.size(); ++i) {
-                    for (size_t j = 0; j < v_param.size(); ++j) {
-                        if (i == 0 && j == 0) {
-                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_1.data());
-                        }
-                        else if (i == 0 && j != 0) {
-                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_2[j - 1].data());
-                        }
-                        else if (i != 0 && j == 0) {
-                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_3[i - 1].data());
-                        }
-                        else {
-                            covariance.GetCovarianceBlockInTangentSpace(v_param[i], v_param[j], covariance_recovered_4[k].data());
-                            k++;
-                        }
-                    }
-                }
-                for (size_t j = 0; j < v_param.size(); ++j) {
-                    if (j == 0) {
-                        covariance_recovered_2[j] *= 2.0;
-                        covariance_recovered_3[j] *= 2.0;
-                        covariance_recovered_4[j] *= 4.0;
-                    }
-                    else {
-                        covariance_recovered_4[j] *= 2.0;
-                    }
-                }
-                Pk_.setZero();
-                Pk_.block<18, 18>(0, 0) = covariance_recovered_1;
-                for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
-                    Pk_.block<18, 3>(0, 18 + 3 * i) = covariance_recovered_2[i];
-                    Pk_.block<3, 18>(18 + 3 * i, 0) = covariance_recovered_3[i];
-                }
-                k = 0;
-                for (size_t i = 0; i < covariance_recovered_2.size(); ++i) {
-                    for (size_t j = 0; j < covariance_recovered_2.size(); ++j){
-                        Pk_.block<3, 3>(18 + 3 * i, 18 + 3 * j) = covariance_recovered_4[k];
-                        k++;
-                    }
-                }
-            }
-            enforceSymmetry(Pk_);
-            //nominalState.boxPlus(errorState, linState_);
-            nominalState.boxPlusInv(errorState, linState_);
-            filter_->update(linState_, Pk_);
-            filter_->state_.q_ex_ = q_b_l;
-            filter_->state_.t_ex_ = t_b_l;
         }
         return;
     }
@@ -1098,8 +1072,8 @@ void initializeGravityAndBias() {
     bw_init_ = sum_angular_vel / imuBuf.size();
     V3D gravity_imu = sum_linear_acc / imuBuf.size();
 
-    G0 = gravity_imu.norm();
-    V3D gravity = V3D(0.0, 0.0, -G0);
+    double G = gravity_imu.norm();
+    V3D gravity = V3D(0.0, 0.0, -G);
     globalState_.setIdentity();
     globalStateLidar_.setIdentity();
     linState_.setIdentity();

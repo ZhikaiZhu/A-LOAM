@@ -57,7 +57,7 @@ typedef Eigen::Quaterniond Q4D;
 
 namespace parameter {
 
-static double G0 = 9.81;
+const double G0 = 9.81;
 
 // !@ENABLE_CALIBRATION
 extern int CALIBARTE_IMU;
