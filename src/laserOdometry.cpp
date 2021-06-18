@@ -58,6 +58,18 @@
 
 #define DISTORTION 0
 
+// time test 
+std::string RESULT_PATH;
+double opt_time = 0.0;
+double whole_time = 0.0;
+/*double preprocessor_time = 0.0;
+double residual_evaluation_time = 0.0;
+double jacobian_evaluation_time = 0.0;
+double linear_solver_time = 0.0;
+double minimizer_time = 0.0;
+double postprocessor_time = 0.0;
+double total_time = 0.0; 
+int ceresCount = 0; */
 
 int corner_correspondence = 0, plane_correspondence = 0;
 
@@ -189,6 +201,10 @@ int main(int argc, char **argv)
     ros::NodeHandle nh;
 
     nh.param<int>("mapping_skip_frame", skipFrameNum, 2);
+    std::string OUTPUT_FOLDER = "/home/spc/output";
+    RESULT_PATH = OUTPUT_FOLDER + "/lio.csv";
+    std::ofstream fout(RESULT_PATH, std::ios::out);
+    fout.close();
 
     printf("Mapping %d Hz \n", 10 / skipFrameNum);
 
@@ -483,7 +499,7 @@ int main(int argc, char **argv)
                     }
 
                     //printf("coner_correspondance %d, plane_correspondence %d \n", corner_correspondence, plane_correspondence);
-                    printf("data association time %f ms \n", t_data.toc());
+                    //printf("data association time %f ms \n", t_data.toc());
 
                     if ((corner_correspondence + plane_correspondence) < 10)
                     {
@@ -497,9 +513,24 @@ int main(int argc, char **argv)
                     options.minimizer_progress_to_stdout = false;
                     ceres::Solver::Summary summary;
                     ceres::Solve(options, &problem, &summary);
-                    printf("solver time %f ms \n", t_solver.toc());
+                    /*ceresCount++;
+                    preprocessor_time += summary.preprocessor_time_in_seconds * 1000;
+                    residual_evaluation_time += summary.residual_evaluation_time_in_seconds * 1000;
+                    jacobian_evaluation_time += summary.jacobian_evaluation_time_in_seconds * 1000;
+                    linear_solver_time += summary.linear_solver_time_in_seconds * 1000;
+                    minimizer_time += summary.minimizer_time_in_seconds * 1000;
+                    postprocessor_time += summary.postprocessor_time_in_seconds * 1000;
+                    total_time += summary.total_time_in_seconds * 1000;
+                    printf("preprocessor time %f ms \n", preprocessor_time / ceresCount);
+                    printf("residual evaluation time %f ms \n", residual_evaluation_time / ceresCount);
+                    printf("jacobian evaluation match time %f ms \n", /jacobian_evaluation_time / ceresCount);
+                    printf("linear solver time %f ms \n", linear_solver_time / ceresCount);
+                    printf("minimizer time %f ms \n", minimizer_time / ceresCount);
+                    printf("postprocessor time %f ms \n", postprocessor_time / ceresCount);
+                    printf("solver time %f ms \n", total_time / ceresCount); */
                 }
-                printf("optimization twice time %f \n", t_opt.toc());
+                opt_time += t_opt.toc();
+                printf("optimization time %f ms \n", opt_time / (frameCount + 1));
 
                 t_w_curr = t_w_curr + q_w_curr * t_last_curr;
                 q_w_curr = q_w_curr * q_last_curr;
@@ -520,6 +551,20 @@ int main(int argc, char **argv)
             laserOdometry.pose.pose.position.y = t_w_curr.y();
             laserOdometry.pose.pose.position.z = t_w_curr.z();
             pubLaserOdometry.publish(laserOdometry);
+
+            std::ofstream lio_path_file(RESULT_PATH, std::ios::app);
+            lio_path_file.setf(std::ios::fixed, std::ios::floatfield);
+            lio_path_file.precision(10);
+            lio_path_file << laserOdometry.header.stamp.toSec() << " ";
+            lio_path_file.precision(5);
+            lio_path_file << laserOdometry.pose.pose.position.x << " "
+                          << laserOdometry.pose.pose.position.y << " "
+                          << laserOdometry.pose.pose.position.z << " "
+                          << laserOdometry.pose.pose.orientation.w << " "
+                          << laserOdometry.pose.pose.orientation.x << " "
+                          << laserOdometry.pose.pose.orientation.y << " "
+                          << laserOdometry.pose.pose.orientation.z << std::endl;
+            lio_path_file.close();
 
             geometry_msgs::PoseStamped laserPose;
             laserPose.header = laserOdometry.header;
@@ -569,7 +614,7 @@ int main(int argc, char **argv)
 
             if (frameCount % skipFrameNum == 0)
             {
-                frameCount = 0;
+                //frameCount = 0;
 
                 sensor_msgs::PointCloud2 laserCloudCornerLast2;
                 pcl::toROSMsg(*laserCloudCornerLast, laserCloudCornerLast2);
@@ -589,8 +634,9 @@ int main(int argc, char **argv)
                 laserCloudFullRes3.header.frame_id = "/camera";
                 pubLaserCloudFullRes.publish(laserCloudFullRes3);
             }
-            printf("publication time %f ms \n", t_pub.toc());
-            printf("whole laserOdometry time %f ms \n \n", t_whole.toc());
+            //printf("publication time %f ms \n", t_pub.toc());
+            whole_time += t_whole.toc();
+            printf("whole laserOdometry time %f ms \n \n", whole_time / (frameCount + 1));
             if(t_whole.toc() > 100)
                 ROS_WARN("odometry process over 100ms");
 
