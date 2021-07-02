@@ -40,6 +40,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <unsupported/Eigen/MatrixFunctions>
 #include <cstdlib>
 
 #include <pcl/point_types.h>
@@ -49,7 +50,7 @@ typedef pcl::PointXYZI PointType;
 namespace utils {
 
 template <typename Derived>
-static int sign(Derived x) {
+static inline int sign(Derived x) {
   if (x >= static_cast<Derived>(0))
     return 1;
   else
@@ -68,11 +69,11 @@ static Type wrap_pi(Type x) {
   return x;
 }
 
-static void enforceSymmetry(Eigen::MatrixXd &mat) {
+static inline void enforceSymmetry(Eigen::MatrixXd &mat) {
   mat = 0.5 * (mat + mat.transpose()).eval();
 }
 
-static Eigen::Quaterniond axis2Quat(const Eigen::Vector3d &axis, double theta) {
+static inline Eigen::Quaterniond axis2Quat(const Eigen::Vector3d &axis, double theta) {
   Eigen::Quaterniond q;
 
   if (theta < 1e-10) {
@@ -226,7 +227,7 @@ static Eigen::Vector3d Q2rpy(const Eigen::Quaterniond &Q) {
 }
 
 template <typename Derived>
-static Eigen::Matrix<typename Derived::Scalar, 3, 3> skew(
+static inline Eigen::Matrix<typename Derived::Scalar, 3, 3> skew(
     const Eigen::MatrixBase<Derived> &q) {
   Eigen::Matrix<typename Derived::Scalar, 3, 3> ans;
   ans << typename Derived::Scalar(0), -q(2), q(1), q(2),
@@ -235,21 +236,26 @@ static Eigen::Matrix<typename Derived::Scalar, 3, 3> skew(
   return ans;
 }
 
+static inline Eigen::Vector3d vee(const Eigen::Matrix3d &w_hat) {
+    const double EPS = 1e-10;
+    assert(fabs(w_hat(2, 1) + w_hat(1, 2)) < EPS);
+    assert(fabs(w_hat(0, 2) + w_hat(2, 0)) < EPS);
+    assert(fabs(w_hat(1, 0) + w_hat(0, 1)) < EPS);
+    return Eigen::Vector3d(w_hat(2, 1), w_hat(0, 2), w_hat(1, 0));
+}
+
 template <typename Derived>
 static Eigen::Quaternion<typename Derived::Scalar> positify(
     const Eigen::QuaternionBase<Derived> &q) {
   // printf("a: %f %f %f %f", q.w(), q.x(), q.y(), q.z());
-  Eigen::Quaternion<typename Derived::Scalar> p(-q.w(), -q.x(), -q.y(), -q.z());
+  //Eigen::Quaternion<typename Derived::Scalar> p(-q.w(), -q.x(), -q.y(), -q.z());
   // printf("b: %f %f %f %f", p.w(), p.x(), p.y(), p.z());
-  return q.template w() >= (typename Derived::Scalar)(0.0)
-             ? q
-             : Eigen::Quaternion<typename Derived::Scalar>(-q.w(), -q.x(),
-                                                           -q.y(), -q.z());
-  // return q;
+  //return q.template w() >= (typename Derived::Scalar)(0.0) ? q : Eigen::Quaternion<typename Derived::Scalar>(-q.w(), -q.x(), -q.y(), -q.z());
+  return q;
 }
 
 template <typename Derived>
-static Eigen::Quaternion<typename Derived::Scalar> deltaQ(
+static inline Eigen::Quaternion<typename Derived::Scalar> deltaQ(
     const Eigen::MatrixBase<Derived> &theta) {
   typedef typename Derived::Scalar Scalar_t;
 
@@ -288,7 +294,7 @@ static Eigen::MatrixBase<Derived> deg2rag(
 }
 
 template <typename Derived>
-static Eigen::Matrix<typename Derived::Scalar, 4, 4> Qleft(
+static inline Eigen::Matrix<typename Derived::Scalar, 4, 4> Qleft(
     const Eigen::QuaternionBase<Derived> &q) {
   Eigen::Quaternion<typename Derived::Scalar> qq = positify(q);
   Eigen::Matrix<typename Derived::Scalar, 4, 4> ans;
@@ -303,7 +309,7 @@ static Eigen::Matrix<typename Derived::Scalar, 4, 4> Qleft(
 }
 
 template <typename Derived>
-static Eigen::Matrix<typename Derived::Scalar, 4, 4> Qright(
+static inline Eigen::Matrix<typename Derived::Scalar, 4, 4> Qright(
     const Eigen::QuaternionBase<Derived> &p) {
   Eigen::Quaternion<typename Derived::Scalar> pp = positify(p);
   Eigen::Matrix<typename Derived::Scalar, 4, 4> ans;
@@ -350,6 +356,75 @@ static Eigen::Matrix<double, 3, 3> Rinvleft(
   ans = s * Eigen::Matrix<double, 3, 3>::Identity() +
         (1.0 - s) * a * a.transpose() - half_theta * skew(a);
   return ans;
+}
+
+static inline Eigen::Matrix<double , 3, 3> Jleft(
+        const Eigen::Matrix<double, 3, 1> axis) {
+    Eigen::Matrix<double, 3, 3> ans;
+    double theta = axis.norm();
+    if (theta < 1e-10) {
+        ans.setIdentity();
+        return ans;
+    }
+    Eigen::Matrix<double, 3, 1> a = axis / theta;
+    double s = sin(theta) / theta;
+    double c = (1 - cos(theta)) / theta;
+    ans = s * Eigen::Matrix<double, 3, 3>::Identity() +
+          (1 - s) * a * a.transpose() + c * skew(a);
+
+    return ans;
+}
+
+static inline Eigen::Matrix<double, 3, 3> Jinvleft(
+        const Eigen::Matrix<double, 3, 1> axis) {
+    Eigen::Matrix<double, 3, 3> ans;
+    double theta = axis.norm();
+
+    if (theta < 1e-10) {
+        ans.setIdentity();
+        return ans;
+    }
+
+    double half_theta = theta / 2.0;
+    Eigen::Matrix<double, 3, 1> a = axis / axis.norm();
+    double cot_half_theta = cos(half_theta) / sin(half_theta);
+    double s = half_theta * cot_half_theta;
+    ans = s * Eigen::Matrix<double, 3, 3>::Identity() +
+          (1.0 - s) * a * a.transpose() - half_theta * skew(a);
+    return ans;
+}
+
+template <typename Derived>
+static Eigen::Matrix<typename Derived::Scalar, 2, 1> getSlerpCoeff(const Eigen::QuaternionBase<Derived> &q0,
+        const Eigen::QuaternionBase<Derived> &q1, const typename Derived::Scalar &t) {
+    typedef typename Derived::Scalar Scalar_t;
+
+    using std::acos;
+    using std::sin;
+    using std::abs;
+    static const Scalar_t one = Scalar_t(1) - Eigen::NumTraits<Scalar_t>::epsilon();
+    Scalar_t d = q0.dot(q1);
+    Scalar_t D = abs(d);
+
+    Scalar_t scale0;
+    Scalar_t scale1;
+
+    if(D >= one)
+    {
+        scale0 = Scalar_t(1) - t;
+        scale1 = t;
+    }
+    else
+    {
+        // theta is the angle between the 2 quaternions
+        Scalar_t theta = acos(D);
+        Scalar_t sinTheta = sin(theta);
+
+        scale0 = sin( ( Scalar_t(1) - t ) * theta) / sinTheta;
+        scale1 = sin( ( t * theta) ) / sinTheta;
+    }
+    //if(d < Scalar_t(0)) scale1 = -scale1;
+    return Eigen::Matrix<typename Derived::Scalar, 2, 1>(scale0, scale1);
 }
 
 }  // namespace utils

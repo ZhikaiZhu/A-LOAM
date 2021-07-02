@@ -57,6 +57,7 @@
 #include "lidarFactor.hpp"
 #include "aloam_velodyne/parameters.h"
 #include "aloam_velodyne/filter_state.hpp"
+#include "aloam_velodyne/pose_local_parameterization.hpp"
 
 using namespace parameter;
 using namespace utils;
@@ -96,8 +97,8 @@ pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>
 double para_error_state[18];
 double para_ex[7];
 //double para_ex[7] = {0, 0, 0, 1, 0, 0, 0};
-Eigen::Map<Eigen::Quaterniond> q_b_l(para_ex);  // from lidar to inertial
-Eigen::Map<Eigen::Vector3d> t_b_l(para_ex + 4);
+Eigen::Map<Eigen::Vector3d> t_b_l(para_ex);
+Eigen::Map<Eigen::Quaterniond> q_b_l(para_ex + 3);  // from lidar to inertial
 
 std::queue<sensor_msgs::PointCloud2ConstPtr> cornerSharpBuf;
 std::queue<sensor_msgs::PointCloud2ConstPtr> cornerLessSharpBuf;
@@ -289,7 +290,7 @@ void findCorrespondingCornerFeatures(ScanPtr lastScan, ScanPtr newScan,
                                      ceres::Problem *problem = nullptr,
                                      GlobalState *nominalState = nullptr) {
     int cornerPointsSharpNum = newScan->cornerPointsSharp_->points.size();
-
+    //TicToc t_match;
     for (int i = 0; i < cornerPointsSharpNum; ++i) {
         PointType pointSel;
         PointType coeff;
@@ -405,12 +406,17 @@ void findCorrespondingCornerFeatures(ScanPtr lastScan, ScanPtr newScan,
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
+                /*ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
                                                                                   nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex, para_ex + 4);
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
+                LidarEdgeFactorExSF *cost_function = new LidarEdgeFactorExSF(curr_point, P1, P2, s, nominalState->rn_, 
+                                                                             nominalState->qbn_, LIDAR_STD / w);
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); 
             }
         }
     }
+    //match_time += t_match.toc();
+    //matchCount++;
 }
 
 void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
@@ -419,7 +425,7 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
                                    ceres::Problem *problem = nullptr,
                                    GlobalState *nominalState = nullptr) {
     int surfPointsFlatNum = newScan->surfPointsFlat_->points.size();
-
+    //TicToc t_match;
     for (int i = 0; i < surfPointsFlatNum; ++i) {
         PointType pointSel;
         PointType coeff;
@@ -537,7 +543,7 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
 
                 keypoints->push_back(newScan->surfPointsFlat_->points[i]);
                 jacobianCoff->push_back(coeff);
-            }
+            } 
 
             if (w > 0.1 && res != 0 && problem != nullptr) {
                 double s;
@@ -546,12 +552,16 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
+                /*ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
                                                                                    nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex, para_ex + 4);
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
+                LidarPlaneFactorExSF *cost_function = new LidarPlaneFactorExSF(curr_point, P1, P2, P3, s, nominalState->rn_,
+                                                                               nominalState->qbn_, LIDAR_STD / w);
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); 
             }
         }
     }
+    //match_time += t_match.toc();
 }
 
 bool calculateTransformation(ScanPtr lastScan, ScanPtr newScan,
@@ -758,7 +768,7 @@ void performIESKF() {
         GlobalState nominalState = filterState;
         Eigen::Map<Eigen::Matrix<double, 18, 1>> errorState(para_error_state);
         ceres::Solver::Options options;
-        options.max_solver_time_in_seconds = 0.05;
+        options.max_solver_time_in_seconds = 0.04;
         options.max_num_iterations = CERES_MAX_ITER;
         options.linear_solver_type = ceres::DENSE_QR;
         Eigen::Matrix<double, 18, 1> last_errorState = errorState;
@@ -770,20 +780,25 @@ void performIESKF() {
             keypointCorns_->clear();
             jacobianCoffCorns_->clear();
 
-            ceres::LocalParameterization *q_parameterization = new ceres::EigenQuaternionParameterization();
+            //ceres::LocalParameterization *q_parameterization = new ceres::EigenQuaternionParameterization();
+            ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
             ceres::Problem problem;
             problem.AddParameterBlock(para_error_state, 18);
-            problem.AddParameterBlock(para_ex, 4, q_parameterization);
-            problem.AddParameterBlock(para_ex + 4, 3);
+            problem.AddParameterBlock(para_ex, 7, local_parameterization);
+            //problem.AddParameterBlock(para_ex, 4, q_parameterization);
+            //problem.AddParameterBlock(para_ex + 4, 3);
             if (!CALIB_EXTRINSIC) {
                 problem.SetParameterBlockConstant(para_ex);
-                problem.SetParameterBlockConstant(para_ex + 4);
-                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_);
-                problem.AddResidualBlock(prior_factor, nullptr, para_error_state);
+                PriorFactorSF *prior_factor = new PriorFactorSF(Pk_);
+                /*problem.SetParameterBlockConstant(para_ex + 4);
+                ceres::CostFunction *prior_factor = PriorFactor::Create(Pk_); */
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state); 
             }
             else {
-                ceres::CostFunction *prior_factor = PriorFactorEx::Create(Pk_, ex_rotation, ex_translation);
-                problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex, para_ex + 4);
+                //ceres::CostFunction *prior_factor = PriorFactorEx::Create(Pk_, ex_rotation, ex_translation);
+                //problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex);
+                PriorFactorExSF *prior_factor = new PriorFactorExSF(Pk_, ex_rotation, ex_translation);
+                problem.AddResidualBlock(prior_factor, nullptr, para_error_state, para_ex);
             }
             
             if (!PURE_IMU) {
@@ -849,7 +864,7 @@ void performIESKF() {
                     std::vector<const double*> v_param;
                     v_param.push_back(para_error_state);
                     v_param.push_back(para_ex);
-                    v_param.push_back(para_ex + 4);
+                    //v_param.push_back(para_ex + 4);
                     // covariance_blocks can't contain duplicates
                     for (size_t i = 0; i < v_param.size(); ++i) {
                         for (size_t j = 0; j <= i; ++j) {
@@ -858,7 +873,7 @@ void performIESKF() {
                     }
                     covariance.Compute(covariance_blocks, &problem);
 
-                    Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
+                    /*Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
                     std::vector<Eigen::Matrix<double, 18, 3, Eigen::RowMajor>> covariance_recovered_2;
                     covariance_recovered_2.resize(v_param.size() - 1);
                     std::vector<Eigen::Matrix<double, 3, 18, Eigen::RowMajor>> covariance_recovered_3;
@@ -905,7 +920,24 @@ void performIESKF() {
                             Pk_.block<3, 3>(18 + 3 * i, 18 + 3 * j) = covariance_recovered_4[k];
                             k++;
                         }
-                    }
+                    } */
+
+                    Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered_1;
+                    Eigen::Matrix<double, 18, 6, Eigen::RowMajor> covariance_recovered_2;
+                    Eigen::Matrix<double, 6, 18, Eigen::RowMajor> covariance_recovered_3;
+                    Eigen::Matrix<double, 6, 6, Eigen::RowMajor> covariance_recovered_4;
+                    covariance.GetCovarianceBlockInTangentSpace(v_param[0], v_param[0], covariance_recovered_1.data());
+                    covariance.GetCovarianceBlockInTangentSpace(v_param[0], v_param[1], covariance_recovered_2.data());
+                    covariance.GetCovarianceBlockInTangentSpace(v_param[1], v_param[0], covariance_recovered_3.data());
+                    covariance.GetCovarianceBlockInTangentSpace(v_param[1], v_param[1], covariance_recovered_4.data());
+                    //covariance_recovered_2.rightCols<3>() *= 2.0;
+                    //covariance_recovered_3.bottomRows<3>() *= 2.0;
+                    //covariance_recovered_4.bottomRightCorner<3, 3>() *= 4.0;
+                    Pk_.setZero();
+                    Pk_.block<18, 18>(0, 0) = covariance_recovered_1;
+                    Pk_.block<18, 6>(0, 18) = covariance_recovered_2;
+                    Pk_.block<6, 18>(18, 0) = covariance_recovered_3;
+                    Pk_.bottomRightCorner<6, 6>() = covariance_recovered_4;
                 }
                 enforceSymmetry(Pk_);
                 //nominalState.boxPlus(errorState, linState_);
@@ -919,13 +951,13 @@ void performIESKF() {
         if (hasDiverged == true) {
             ROS_WARN("======Using ICP Method======");
             // Reset extrinsic parameters
-            para_ex[0] = INIT_RBL.x();
-            para_ex[1] = INIT_RBL.y();
-            para_ex[2] = INIT_RBL.z();
-            para_ex[3] = INIT_RBL.w();
-            para_ex[4] = INIT_TBL.x();
-            para_ex[5] = INIT_TBL.y();
-            para_ex[6] = INIT_TBL.z();
+            para_ex[0] = INIT_TBL.x();
+            para_ex[1] = INIT_TBL.y();
+            para_ex[2] = INIT_TBL.z();
+            para_ex[3] = INIT_RBL.x();
+            para_ex[4] = INIT_RBL.y();
+            para_ex[5] = INIT_RBL.z();
+            para_ex[6] = INIT_RBL.w();
 
             V3D t = filterState.rn_;
             Q4D q = filterState.qbn_;
@@ -1182,13 +1214,13 @@ void Initialization(ros::NodeHandle &nh) {
     Pk_.setZero();
     Qk_.setZero();
 
-    para_ex[0] = INIT_RBL.x();
-    para_ex[1] = INIT_RBL.y();
-    para_ex[2] = INIT_RBL.z();
-    para_ex[3] = INIT_RBL.w();
-    para_ex[4] = INIT_TBL.x();
-    para_ex[5] = INIT_TBL.y();
-    para_ex[6] = INIT_TBL.z();
+    para_ex[0] = INIT_TBL.x();
+    para_ex[1] = INIT_TBL.y();
+    para_ex[2] = INIT_TBL.z();
+    para_ex[3] = INIT_RBL.x();
+    para_ex[4] = INIT_RBL.y();
+    para_ex[5] = INIT_RBL.z();
+    para_ex[6] = INIT_RBL.w();
 }
 
 void swapScan() {

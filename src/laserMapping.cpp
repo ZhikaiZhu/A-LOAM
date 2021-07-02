@@ -747,7 +747,7 @@ void process()
 					//	   parameters[4], parameters[5], parameters[6]);
 				}
 				opt_time += t_opt.toc();
-				printf("mapping optimization time %f ms \n", opt_time / (frameCount + 1));
+				//printf("mapping optimization time %f ms \n", opt_time / (frameCount + 1));
 			}
 			else
 			{

@@ -102,8 +102,8 @@ class GlobalState {
   static constexpr unsigned int acc_ = 9;
   static constexpr unsigned int gyr_ = 12;
   static constexpr unsigned int gra_ = 15;
-  static constexpr unsigned int ex_att_ = 18;
-  static constexpr unsigned int ex_pos_ = 21;
+  static constexpr unsigned int ex_pos_ = 18;
+  static constexpr unsigned int ex_att_ = 21;
 
   GlobalState() { setIdentity(); }
 
@@ -378,10 +378,10 @@ class StatePredictor {
       covariance_.block<3, 3>(GlobalState::gra_, GlobalState::gra_) =
           gra_cov.asDiagonal();  // gravity     
       if (IS_CALIB_EX) {
-        covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) =
-            ex_rotation_cov.asDiagonal();
         covariance_.block<3, 3>(GlobalState::ex_pos_, GlobalState::ex_pos_) =
             ex_translation_cov.asDiagonal();
+        covariance_.block<3, 3>(GlobalState::ex_att_, GlobalState::ex_att_) =
+            ex_rotation_cov.asDiagonal();
       }
     } else if (type == 1) {
       // Inheritage previous covariance

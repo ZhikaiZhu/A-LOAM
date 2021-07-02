@@ -64,10 +64,10 @@ using std::sin;
 const int systemDelay = 0; 
 int systemInitCount = 0;
 bool systemInited = false;
-float cloudCurvature[400000];
-int cloudSortInd[400000];
-int cloudNeighborPicked[400000];
-int cloudLabel[400000];
+float cloudCurvature[40000];
+int cloudSortInd[40000];
+int cloudNeighborPicked[40000];
+int cloudLabel[40000];
 
 // The number of features
 int count = 0.0;
