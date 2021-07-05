@@ -67,6 +67,7 @@ extern int N_SCANS;
 extern int SCAN_NUM;
 extern double SCAN_PERIOD;
 extern double MINIMUM_RANGE;
+extern double MAXIMUM_RANGE;
 extern double EDGE_THRESHOLD;
 extern double SURF_THRESHOLD;
 extern double DISTANCE_SQ_THRESHOLD;

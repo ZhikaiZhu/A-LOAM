@@ -47,6 +47,7 @@
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -90,7 +91,7 @@ bool PUB_EACH_LINE = false;
 
 template <typename PointT>
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
-                              pcl::PointCloud<PointT> &cloud_out, float thres)
+                              pcl::PointCloud<PointT> &cloud_out, float thres1, float thres2)
 {
     if (&cloud_in != &cloud_out)
     {
@@ -102,7 +103,8 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
 
     for (size_t i = 0; i < cloud_in.points.size(); ++i)
     {
-        if (cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y + cloud_in.points[i].z * cloud_in.points[i].z < thres * thres)
+        float dis = std::sqrt(cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y);
+        if (dis < thres1 || dis > thres2)
             continue;
         cloud_out.points[j] = cloud_in.points[i];
         j++;
@@ -135,18 +137,17 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     std::vector<int> scanStartInd(N_SCANS, 0);
     std::vector<int> scanEndInd(N_SCANS, 0);
 
-    pcl::PointCloud<pcl::PointXYZ> laserCloudIn;
-    pcl::fromROSMsg(*laserCloudMsg, laserCloudIn);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr laserCloudIn(new pcl::PointCloud<pcl::PointXYZ>());
+    pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
     std::vector<int> indices;
 
-    pcl::removeNaNFromPointCloud(laserCloudIn, laserCloudIn, indices);
-    removeClosedPointCloud(laserCloudIn, laserCloudIn, MINIMUM_RANGE);
+    pcl::removeNaNFromPointCloud(*laserCloudIn, *laserCloudIn, indices);
+    removeClosedPointCloud(*laserCloudIn, *laserCloudIn, MINIMUM_RANGE, MAXIMUM_RANGE);
 
-
-    int cloudSize = laserCloudIn.points.size();
-    float startOri = -atan2(laserCloudIn.points[0].y, laserCloudIn.points[0].x);
-    float endOri = -atan2(laserCloudIn.points[cloudSize - 1].y,
-                          laserCloudIn.points[cloudSize - 1].x) +
+    int cloudSize = laserCloudIn->points.size();
+    float startOri = -atan2(laserCloudIn->points[0].y, laserCloudIn->points[0].x);
+    float endOri = -atan2(laserCloudIn->points[cloudSize - 1].y,
+                          laserCloudIn->points[cloudSize - 1].x) +
                    2 * M_PI;
 
     if (endOri - startOri > 3 * M_PI)
@@ -165,9 +166,9 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     std::vector<pcl::PointCloud<PointType>> laserCloudScans(N_SCANS);
     for (int i = 0; i < cloudSize; i++)
     {
-        point.x = laserCloudIn.points[i].x;
-        point.y = laserCloudIn.points[i].y;
-        point.z = laserCloudIn.points[i].z;
+        point.x = laserCloudIn->points[i].x;
+        point.y = laserCloudIn->points[i].y;
+        point.z = laserCloudIn->points[i].z;
 
         float angle = atan(point.z / sqrt(point.x * point.x + point.y * point.y)) * 180 / M_PI;
         int scanID = 0;
@@ -264,11 +265,64 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         float diffX = laserCloud->points[i - 5].x + laserCloud->points[i - 4].x + laserCloud->points[i - 3].x + laserCloud->points[i - 2].x + laserCloud->points[i - 1].x - 10 * laserCloud->points[i].x + laserCloud->points[i + 1].x + laserCloud->points[i + 2].x + laserCloud->points[i + 3].x + laserCloud->points[i + 4].x + laserCloud->points[i + 5].x;
         float diffY = laserCloud->points[i - 5].y + laserCloud->points[i - 4].y + laserCloud->points[i - 3].y + laserCloud->points[i - 2].y + laserCloud->points[i - 1].y - 10 * laserCloud->points[i].y + laserCloud->points[i + 1].y + laserCloud->points[i + 2].y + laserCloud->points[i + 3].y + laserCloud->points[i + 4].y + laserCloud->points[i + 5].y;
         float diffZ = laserCloud->points[i - 5].z + laserCloud->points[i - 4].z + laserCloud->points[i - 3].z + laserCloud->points[i - 2].z + laserCloud->points[i - 1].z - 10 * laserCloud->points[i].z + laserCloud->points[i + 1].z + laserCloud->points[i + 2].z + laserCloud->points[i + 3].z + laserCloud->points[i + 4].z + laserCloud->points[i + 5].z;
+        float diff = diffX * diffX + diffY * diffY + diffZ * diffZ;
 
-        cloudCurvature[i] = diffX * diffX + diffY * diffY + diffZ * diffZ;
+        cloudCurvature[i] = diff;
         cloudSortInd[i] = i;
         cloudNeighborPicked[i] = 0;
         cloudLabel[i] = 0;
+
+        if (diff > 0.1) {
+            float depth1 = std::sqrt(laserCloud->points[i].x * laserCloud->points[i].x + 
+                                     laserCloud->points[i].y * laserCloud->points[i].y + 
+                                     laserCloud->points[i].z * laserCloud->points[i].z);
+            float depth2 = std::sqrt(laserCloud->points[i + 1].x * laserCloud->points[i + 1].x + 
+                                     laserCloud->points[i + 1].y * laserCloud->points[i + 1].y + 
+                                     laserCloud->points[i + 1].z * laserCloud->points[i + 1].z);
+            if (depth1 > depth2) {
+                diffX = laserCloud->points[i + 1].x - laserCloud->points[i].x * depth2 / depth1;
+                diffY = laserCloud->points[i + 1].y - laserCloud->points[i].y * depth2 / depth1;
+                diffZ = laserCloud->points[i + 1].z - laserCloud->points[i].z * depth2 / depth1;
+
+                if (std::sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ) / depth2 < 0.1) {
+                    cloudNeighborPicked[i - 5] = 1;
+                    cloudNeighborPicked[i - 4] = 1;
+                    cloudNeighborPicked[i - 3] = 1;
+                    cloudNeighborPicked[i - 2] = 1;
+                    cloudNeighborPicked[i - 1] = 1;
+                    cloudNeighborPicked[i] = 1;
+                }
+            }
+            else {
+                diffX = laserCloud->points[i + 1].x * depth1 / depth2 - laserCloud->points[i].x;
+                diffY = laserCloud->points[i + 1].y * depth1 / depth2 - laserCloud->points[i].y;
+                diffZ = laserCloud->points[i + 1].z * depth1 / depth2 - laserCloud->points[i].z;
+
+                if (std::sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ) / depth1 < 0.1) {
+                    cloudNeighborPicked[i + 1] = 1;
+                    cloudNeighborPicked[i + 2] = 1;
+                    cloudNeighborPicked[i + 3] = 1;
+                    cloudNeighborPicked[i + 4] = 1;
+                    cloudNeighborPicked[i + 5] = 1;
+                    cloudNeighborPicked[i + 6] = 1;
+                }
+            }
+        }
+        float diffX1 = laserCloud->points[i].x - laserCloud->points[i + 1].x;
+        float diffY1 = laserCloud->points[i].y - laserCloud->points[i + 1].y;
+        float diffZ1 = laserCloud->points[i].z - laserCloud->points[i + 1].z;
+        float diff1 = diffX1 * diffX1 + diffY1 * diffY1 + diffZ1 * diffZ1;
+        float diffX2 = laserCloud->points[i].x - laserCloud->points[i - 1].x;
+        float diffY2 = laserCloud->points[i].y - laserCloud->points[i - 1].y;
+        float diffZ2 = laserCloud->points[i].z - laserCloud->points[i - 1].z;
+        float diff2 = diffX2 * diffX2 + diffY2 * diffY2 + diffZ2 * diffZ2;
+        float dis = laserCloud->points[i].x * laserCloud->points[i].x + 
+                    laserCloud->points[i].y * laserCloud->points[i].y + 
+                    laserCloud->points[i].z * laserCloud->points[i].z;
+        
+        if (diff1 > 0.0002 * dis && diff2 > 0.0002 * dis) {
+            cloudNeighborPicked[i] = 1;
+        }
     }
 
 

@@ -27,6 +27,7 @@ int N_SCANS;
 int SCAN_NUM;
 double SCAN_PERIOD;
 double MINIMUM_RANGE;
+double MAXIMUM_RANGE;
 double EDGE_THRESHOLD;
 double SURF_THRESHOLD;
 double DISTANCE_SQ_THRESHOLD;
@@ -97,6 +98,7 @@ void readParameters(ros::NodeHandle& n) {
   SCAN_NUM = fsSettings["scan_num"];
   SCAN_PERIOD = fsSettings["scan_period"];
   MINIMUM_RANGE = fsSettings["minimum_range"];
+  MAXIMUM_RANGE = fsSettings["maximum_range"];
   EDGE_THRESHOLD = fsSettings["edge_threshold"];
   SURF_THRESHOLD = fsSettings["surf_threshold"];
   DISTANCE_SQ_THRESHOLD = fsSettings["distance_sq_threshold"];
