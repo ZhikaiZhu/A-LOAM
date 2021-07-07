@@ -6,6 +6,7 @@ n_scans: 16
 scan_num: 1800
 scan_period: 0.1
 minimum_range: 0.3
+maximum_range: 90.0
 edge_threshold: 0.1
 surf_threshold: 0.1
 distance_sq_threshold: 25
