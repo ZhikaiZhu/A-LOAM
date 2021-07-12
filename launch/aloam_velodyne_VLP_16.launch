@@ -3,9 +3,6 @@
     <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
     <param name="mapping_skip_frame" type="int" value="1" />
 
-    <param name="mapping_line_resolution" type="double" value="0.4"/>
-    <param name="mapping_plane_resolution" type="double" value="0.8"/>
-
     <!-- Config Path -->
     <arg name="config_path" default="$(find aloam_velodyne)/config/params.yaml" />
     
@@ -17,9 +14,13 @@
         <param name="config_file" type="string" value="$(arg config_path)" />
     </node>
 
-    <node pkg="aloam_velodyne" type="alaserMapping" name="alaserMapping" output="screen">
+    <!--<node pkg="aloam_velodyne" type="alaserMapping" name="alaserMapping" output="screen">
         <param name="config_file" type="string" value="$(arg config_path)" />
-    </node>  
+    </node>-->
+
+    <node pkg="aloam_velodyne" type="lidarMapping" name="lidarMapping" output="screen">
+        <param name="config_file" type="string" value="$(arg config_path)" />
+    </node>
 
     <arg name="rviz" default="true" />
     <group if="$(arg rviz)">

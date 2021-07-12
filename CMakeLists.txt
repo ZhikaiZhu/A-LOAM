@@ -18,7 +18,20 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   cv_bridge
   tf
-  pcl_ros
+  pcl_ros 
+)
+
+add_message_files(
+  DIRECTORY msg
+  FILES
+  KeyFrame.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  geometry_msgs
+  std_msgs
+  nav_msgs
 )
 
 #find_package(Eigen3 REQUIRED)
@@ -58,4 +71,7 @@ target_link_libraries(kittiHelper ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_
 
 add_executable(mapViewer src/mapViewer.cpp)
 target_link_libraries(mapViewer ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
+
+add_executable(lidarMapping src/lidarMapping.cpp ${SOURCE_FILES})
+target_link_libraries(lidarMapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${CERES_LIBRARIES})
 

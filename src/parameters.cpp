@@ -27,9 +27,17 @@ int N_SCANS;
 int SCAN_NUM;
 double SCAN_PERIOD;
 double MINIMUM_RANGE;
+double MAXIMUM_RANGE;
 double EDGE_THRESHOLD;
 double SURF_THRESHOLD;
 double DISTANCE_SQ_THRESHOLD;
+double MAP_CORNER_RES;
+double MAP_SURF_RES;
+double MAP_SURR_KF_RES;
+double DISTANCE_KEYFRAMES;
+double ORIENTATION_KEYFRAMES;
+double SURROUNDING_KF_RADIUS;
+double GLOBALMAP_KF_RADIUS;
 
 // !@TESTING
 int ICP_FREQ;
@@ -97,9 +105,17 @@ void readParameters(ros::NodeHandle& n) {
   SCAN_NUM = fsSettings["scan_num"];
   SCAN_PERIOD = fsSettings["scan_period"];
   MINIMUM_RANGE = fsSettings["minimum_range"];
+  MAXIMUM_RANGE = fsSettings["maximum_range"];
   EDGE_THRESHOLD = fsSettings["edge_threshold"];
   SURF_THRESHOLD = fsSettings["surf_threshold"];
   DISTANCE_SQ_THRESHOLD = fsSettings["distance_sq_threshold"];
+  MAP_CORNER_RES = fsSettings["map_corner_res"];
+  MAP_SURF_RES = fsSettings["map_surf_res"];
+  MAP_SURR_KF_RES = fsSettings["map_surr_kf_res"];
+  DISTANCE_KEYFRAMES = fsSettings["dis_keyframes"];
+  ORIENTATION_KEYFRAMES = fsSettings["ori_keyframes"];
+  SURROUNDING_KF_RADIUS = fsSettings["surrounding_kf_radius"];
+  GLOBALMAP_KF_RADIUS = fsSettings["globalmap_kf_radius"];
   ICP_FREQ = fsSettings["icp_freq"];
   MAX_LIDAR_NUMS = fsSettings["max_lidar_nums"];
   NUM_ITER = fsSettings["num_iter"];

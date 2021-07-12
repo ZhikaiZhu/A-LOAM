@@ -91,7 +91,7 @@ bool PUB_EACH_LINE = false;
 
 template <typename PointT>
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
-                              pcl::PointCloud<PointT> &cloud_out, float thres)
+                              pcl::PointCloud<PointT> &cloud_out, float thres1, float thres2)
 {
     if (&cloud_in != &cloud_out)
     {
@@ -103,7 +103,8 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
 
     for (size_t i = 0; i < cloud_in.points.size(); ++i)
     {
-        if (cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y + cloud_in.points[i].z * cloud_in.points[i].z < thres * thres)
+        float dis = std::sqrt(cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y);
+        if ( dis < thres1 || dis > thres2)
             continue;
         cloud_out.points[j] = cloud_in.points[i];
         j++;
@@ -141,7 +142,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     std::vector<int> indices;
 
     pcl::removeNaNFromPointCloud(*laserCloudIn, *laserCloudIn, indices);
-    removeClosedPointCloud(*laserCloudIn, *laserCloudIn, MINIMUM_RANGE);
+    removeClosedPointCloud(*laserCloudIn, *laserCloudIn, MINIMUM_RANGE, MAXIMUM_RANGE);
 
     int cloudSize = laserCloudIn->points.size();
     float startOri = -atan2(laserCloudIn->points[0].y, laserCloudIn->points[0].x);

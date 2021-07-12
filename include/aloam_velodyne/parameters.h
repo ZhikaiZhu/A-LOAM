@@ -67,9 +67,17 @@ extern int N_SCANS;
 extern int SCAN_NUM;
 extern double SCAN_PERIOD;
 extern double MINIMUM_RANGE;
+extern double MAXIMUM_RANGE;
 extern double EDGE_THRESHOLD;
 extern double SURF_THRESHOLD;
 extern double DISTANCE_SQ_THRESHOLD;
+extern double MAP_CORNER_RES;
+extern double MAP_SURF_RES;
+extern double MAP_SURR_KF_RES;
+extern double DISTANCE_KEYFRAMES;
+extern double ORIENTATION_KEYFRAMES;
+extern double SURROUNDING_KF_RADIUS;
+extern double GLOBALMAP_KF_RADIUS;
 
 // !@TESTING
 extern int ICP_FREQ;

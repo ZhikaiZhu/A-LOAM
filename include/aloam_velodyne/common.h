@@ -47,6 +47,30 @@
 
 typedef pcl::PointXYZI PointType;
 
+class Pose6D {
+  public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    Pose6D() {
+      q_ = Eigen::Quaterniond::Identity();
+      t_ = Eigen::Vector3d::Zero();
+    }
+
+    Pose6D(const Pose6D &pose) {
+      q_ = pose.q_;
+      t_ = pose.t_;
+    }
+
+    Pose6D(const Eigen::Quaterniond &q, const Eigen::Vector3d &t) {
+      q_ = q;
+      q_.normalize();
+      t_ = t;
+    }
+
+    Eigen::Quaterniond q_;
+    Eigen::Vector3d t_;
+};
+
 namespace utils {
 
 template <typename Derived>

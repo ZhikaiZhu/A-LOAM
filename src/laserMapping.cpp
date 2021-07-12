@@ -63,6 +63,7 @@
 #include "aloam_velodyne/tic_toc.h"
 #include "aloam_velodyne/map_viewer.hpp"
 #include "aloam_velodyne/parameters.h"
+#include "aloam_velodyne/pose_local_parameterization.hpp"
 
 using namespace parameter;
 using namespace utils;
@@ -122,9 +123,12 @@ pcl::PointCloud<PointType>::Ptr laserCloudSurfArray[laserCloudNum];
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeCornerFromMap(new pcl::KdTreeFLANN<PointType>());
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeSurfFromMap(new pcl::KdTreeFLANN<PointType>());
 
-double parameters[7] = {0, 0, 0, 1, 0, 0, 0};
+/*double parameters[7] = {0, 0, 0, 1, 0, 0, 0};
 Eigen::Map<Eigen::Quaterniond> q_w_curr(parameters);
-Eigen::Map<Eigen::Vector3d> t_w_curr(parameters + 4);
+Eigen::Map<Eigen::Vector3d> t_w_curr(parameters + 4); */
+double parameters[7] = {0, 0, 0, 0, 0, 0, 1};
+Eigen::Map<Eigen::Quaterniond> q_w_curr(parameters + 3);
+Eigen::Map<Eigen::Vector3d> t_w_curr(parameters);
 
 // wmap_T_odom * odom_T_curr = wmap_T_curr;
 // transformation between odom's world and map's world frame
@@ -584,13 +588,14 @@ void process()
 				{
 					//ceres::LossFunction *loss_function = NULL;
 					ceres::LossFunction *loss_function = new ceres::HuberLoss(0.1);
-					ceres::LocalParameterization *q_parameterization =
-						new ceres::EigenQuaternionParameterization();
+					//ceres::LocalParameterization *q_parameterization = new ceres::EigenQuaternionParameterization();
+					ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
 					ceres::Problem::Options problem_options;
 
 					ceres::Problem problem(problem_options);
-					problem.AddParameterBlock(parameters, 4, q_parameterization);
-					problem.AddParameterBlock(parameters + 4, 3);
+					//problem.AddParameterBlock(parameters, 4, q_parameterization);
+					//problem.AddParameterBlock(parameters + 4, 3);
+					problem.AddParameterBlock(parameters, 7, local_parameterization);
 
 					TicToc t_data;
 					int corner_num = 0;
@@ -636,8 +641,10 @@ void process()
 								point_a = 0.1 * unit_direction + point_on_line;
 								point_b = -0.1 * unit_direction + point_on_line;
 
-								ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
-								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								//ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
+								//problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								LidarMapEdgeFactor *cost_function = new LidarMapEdgeFactor(curr_point, point_a, point_b);
+								problem.AddResidualBlock(cost_function, loss_function, parameters);
 								corner_num++;	
 							}							
 						}
@@ -701,8 +708,10 @@ void process()
 							Eigen::Vector3d curr_point(pointOri.x, pointOri.y, pointOri.z);
 							if (planeValid)
 							{
-								ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
-								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								//ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
+								//problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								LidarMapPlaneNormFactor *cost_function = new LidarMapPlaneNormFactor(curr_point, norm, negative_OA_dot_norm);
+								problem.AddResidualBlock(cost_function, loss_function, parameters);
 								surf_num++;
 							}
 						}
