@@ -292,16 +292,16 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &laserOdometry)
 void extractSurroundingKeyFrames()
 {
     if (pose_keyframes_3d->points.empty()) return;
-	if ((!laserCloudSurfFromMapDS->points.size() == 0) && (!laserCloudCornerFromMapDS->points.size() == 0)) {
+	/*if ((!laserCloudSurfFromMapDS->points.size() == 0) && (!laserCloudCornerFromMapDS->points.size() == 0)) {
 		printf("not need to construct the map \n");
 		return;
-	}
+	}*/
 
 	pose_point_curr.x = t_wmap_curr.x();
 	pose_point_curr.y = t_wmap_curr.y();
 	pose_point_curr.z = t_wmap_curr.z();
 
-	surroundingKeyframes->clear();
+	/*surroundingKeyframes->clear();
 	kdtreeSurroundingKeyframes->setInputCloud(pose_keyframes_3d);
 	kdtreeSurroundingKeyframes->radiusSearch(pose_point_curr, SURROUNDING_KF_RADIUS, pointSearchInd, pointSearchSqDis, 0);
 	for (size_t i = 0; i < pointSearchInd.size(); ++i) {
@@ -367,7 +367,66 @@ void extractSurroundingKeyFrames()
 		int j = (int)surroundingExistingKeyframesDS->points[i].intensity;
 		*laserCloudSurfFromMap += *surroundingSurfCloudKeyframes[j];
 		*laserCloudCornerFromMap += *surroundingCornerCloudKeyframes[j];
+	}*/
+
+	surroundingKeyframes->clear();
+	surroundingKeyframesDS->clear();
+	kdtreeSurroundingKeyframes->setInputCloud(pose_keyframes_3d);
+	kdtreeSurroundingKeyframes->radiusSearch(pose_point_curr, SURROUNDING_KF_RADIUS, pointSearchInd, pointSearchSqDis, 0);
+	for (size_t i = 0; i < pointSearchInd.size(); ++i) {
+		surroundingKeyframes->push_back(pose_keyframes_3d->points[pointSearchInd[i]]);
 	}
+	downSizeFilterSurroundingKeyframes.setInputCloud(surroundingKeyframes);
+	downSizeFilterSurroundingKeyframes.filter(*surroundingKeyframesDS);
+	
+	// delete indexes in existing keyframes that are not in current surrounding keyframe
+	for (size_t i = 0; i < surroundingExistingKeyframesID.size(); ++i) {
+		bool existing_flag = false;
+		for (size_t j = 0; j < surroundingKeyframesDS->points.size(); ++j) {			
+			if (surroundingExistingKeyframesID[i] == (int)surroundingKeyframesDS->points[j].intensity) {
+				existing_flag = true;
+				break;
+			}
+		}
+		if (!existing_flag) {
+			surroundingExistingKeyframesID.erase(surroundingExistingKeyframesID.begin() + i);
+			surroundingSurfCloudKeyframes.erase(surroundingSurfCloudKeyframes.begin() + i);
+			surroundingCornerCloudKeyframes.erase(surroundingCornerCloudKeyframes.begin() + i);
+			--i;
+		}
+	}
+
+	// add points in current surrounding keyframes that are not in existing keyframes
+	for (size_t i = 0; i < surroundingKeyframesDS->points.size(); ++i) {
+		bool existing_flag = false;
+		for (size_t j = 0; j < surroundingExistingKeyframesID.size(); ++j) {
+			if (surroundingExistingKeyframesID[j] == (int)surroundingKeyframesDS->points[i].intensity) {
+				existing_flag = true;
+				break;
+			}
+		}
+		if (existing_flag) {
+			continue;
+		}
+		else {
+			int key_ind = (int)surroundingKeyframesDS->points[i].intensity;
+			surroundingExistingKeyframesID.push_back(key_ind);
+			const Pose6D &curr_pose = pose_keyframes_6d[key_ind].second;
+
+			pcl::PointCloud<PointType>::Ptr surf_trans(new pcl::PointCloud<PointType>());
+			transformPointCloud(surfCloudKeyframes[key_ind], surf_trans, curr_pose);
+			surroundingSurfCloudKeyframes.push_back(surf_trans);
+
+			pcl::PointCloud<PointType>::Ptr corner_trans(new pcl::PointCloud<PointType>());
+			transformPointCloud(cornerCloudKeyframes[key_ind], corner_trans, curr_pose);
+			surroundingCornerCloudKeyframes.push_back(corner_trans);
+		}
+	}
+
+	for (size_t i = 0; i < surroundingExistingKeyframesID.size(); ++i) {
+		*laserCloudSurfFromMap += *surroundingSurfCloudKeyframes[i];
+		*laserCloudCornerFromMap += *surroundingCornerCloudKeyframes[i];
+	} 
 
 	downSizeFilterSurfMap.setInputCloud(laserCloudSurfFromMap);
 	downSizeFilterSurfMap.filter(*laserCloudSurfFromMapDS);
@@ -390,7 +449,8 @@ void scan2MapOptimization()
 {
 	size_t laserCloudSurfFromMapDSNum = laserCloudSurfFromMapDS->points.size();
 	size_t laserCloudCornerFromMapDSNum = laserCloudCornerFromMapDS->points.size();
-	if(laserCloudSurfFromMapDSNum > 50 && laserCloudCornerFromMapDSNum > 10) {
+	//printf("map surf num: %lu, corner num: %lu \n", laserCloudSurfFromMapDSNum, laserCloudCornerFromMapDSNum);
+	if (laserCloudSurfFromMapDSNum > 50 && laserCloudCornerFromMapDSNum > 10) {
 		PointType pointOri, pointSel;
 		
 		kdtreeCornerFromMap->setInputCloud(laserCloudCornerFromMapDS);
@@ -571,6 +631,8 @@ void saveKeyframe()
 
     surfCloudKeyframes.push_back(this_surf_ds);
     cornerCloudKeyframes.push_back(this_corner_ds);
+	size_t keyframeNum = pose_keyframes_3d->points.size();
+	printf("the size of keyframe: %lu \n", keyframeNum);
 }
 
 void pubPointCloud()
@@ -870,26 +932,31 @@ void process()
 
 			TicToc t_whole;
 
-			transformAssociateToMap();
+			if (timeLaserOdometry - timeLastProcessing >= mappingProcessInterval) {
+				timeLastProcessing = timeLaserOdometry;
 
-			extractSurroundingKeyFrames();
+				transformAssociateToMap();
 
-			downsampleCurrentScan();
+				extractSurroundingKeyFrames();
 
-			TicToc t_opt;
-			scan2MapOptimization();
-			opt_time += t_opt.toc();
-			printf("mapping optimization time %f ms \n", opt_time / (frameCount + 1));
+				downsampleCurrentScan();
 
-			transformUpdate();
+				TicToc t_opt;
+				scan2MapOptimization();
+				opt_time += t_opt.toc();
+				//printf("mapping optimization time %f ms \n", opt_time / (frameCount + 1));
 
-			saveKeyframe();
+				transformUpdate();
 
-			pubPointCloud();
+				saveKeyframe();
 
-			pubOdometry();
+				pubPointCloud();
 
-			if (save_new_keyframe) {
+				pubOdometry();
+
+				/*if (save_new_keyframe) {
+					clearCloud();
+				}*/
 				clearCloud();
 			}
 
