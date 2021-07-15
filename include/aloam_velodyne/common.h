@@ -42,12 +42,24 @@
 #include <Eigen/Geometry>
 #include <unsupported/Eigen/MatrixFunctions>
 #include <cstdlib>
+#include <random>
 
 #include <pcl/point_types.h>
 
 typedef pcl::PointXYZI PointType;
 
 namespace utils {
+
+template <typename T>
+T *rand_array_uniform(T low, T high, size_t num) {
+  T *res = new T[num];
+  std::mt19937 random_engine;
+  auto nor = std::uniform_real_distribution<T>(low, high);
+  for (size_t i = 0; i < num; ++i) {
+    res[i] = nor(random_engine);
+  }
+  return res;
+}
 
 template <typename Derived>
 static inline int sign(Derived x) {

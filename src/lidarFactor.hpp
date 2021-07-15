@@ -1141,3 +1141,183 @@ public:
     Eigen::Quaterniond qbn;
     double cov;
 };
+
+class LidarMapEdgeFactor: public ceres::SizedCostFunction<1, 7>
+{
+public:
+    LidarMapEdgeFactor(const Eigen::Vector3d &curr_point_, const Eigen::Vector3d &last_point_a_,
+                       const Eigen::Vector3d &last_point_b_): curr_point(curr_point_),
+        last_point_a(last_point_a_), last_point_b(last_point_b_) {}
+
+    virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
+    {
+        Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
+        Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+        Eigen::Vector3d cp = curr_point;
+        Eigen::Vector3d lpa = last_point_a;
+        Eigen::Vector3d lpb = last_point_b;
+
+        Eigen::Matrix<double, 3, 1> lp = q_w_curr * cp + t_w_curr;
+
+        Eigen::Matrix<double, 3, 1> nu = (lp - lpa).cross(lp - lpb);
+        Eigen::Matrix<double, 3, 1> de = lpa - lpb;
+
+        residuals[0] = nu.norm() / de.norm();
+
+        if (jacobians) {
+            if (jacobians[0]) {
+                Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>> jacobian_pose(jacobians[0]);
+                jacobian_pose.setZero();
+                Eigen::Vector3d coeff = nu.transpose() * utils::skew(lpb - lpa) / (nu.norm() * de.norm());
+                jacobian_pose.block<1, 3>(0, 0) = coeff.transpose();
+                jacobian_pose.block<1, 3>(0, 3) = -coeff.transpose() * utils::skew(q_w_curr * cp);
+            }
+        }
+
+        return true;
+    }
+
+    void check(double **parameters)
+    {
+        double *res = new double[1];
+        double **jaco = new double *[1];
+        jaco[0] = new double[1 * 7];
+        Evaluate(parameters, res, jaco);
+        puts("check begin");
+        puts("my");
+
+        std::cout << Eigen::Map<Eigen::Matrix<double, 1, 1>>(res).transpose() << std::endl << std::endl;
+        std::cout << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[0]) << std::endl << std::endl;
+
+        Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
+        Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+        Eigen::Vector3d cp = curr_point;
+        Eigen::Vector3d lpa = last_point_a;
+        Eigen::Vector3d lpb = last_point_b;
+
+        Eigen::Matrix<double, 3, 1> lp = q_w_curr * cp + t_w_curr;
+
+        Eigen::Matrix<double, 3, 1> nu = (lp - lpa).cross(lp - lpb);
+        Eigen::Matrix<double, 3, 1> de = lpa - lpb;
+        Eigen::Matrix<double, 1, 1> residual;
+        residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( nu.norm() / de.norm() );
+
+        puts("num");
+        std::cout << residual.transpose() << std::endl <<  std::endl;
+
+        const double eps = 1e-6;
+        Eigen::Matrix<double, 1, 7> num_jacobian_pose;
+        for (int k = 0; k < 6; k++) {
+            Eigen::Vector3d t_w_curr_new{parameters[0][0], parameters[0][1], parameters[0][2]};
+            Eigen::Quaterniond q_w_curr_new{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+            int a = k / 3, b = k % 3;
+            Eigen::Vector3d delta = Eigen::Vector3d(b == 0, b == 1, b == 2) * eps;
+
+            if (a == 0) {
+                t_w_curr_new += delta;
+            }
+            else if (a == 1) {
+                q_w_curr_new = utils::deltaQ(delta) * q_w_curr_new;
+            }
+
+            Eigen::Matrix<double, 3, 1> lp = q_w_curr_new * cp + t_w_curr_new;
+
+            Eigen::Matrix<double, 3, 1> nu = (lp - lpa).cross(lp - lpb);
+            Eigen::Matrix<double, 3, 1> de = lpa - lpb;
+
+            Eigen::Matrix<double, 1, 1> tmp_residual;
+            tmp_residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( nu.norm() / de.norm() );
+
+            num_jacobian_pose.col(k) = (tmp_residual - residual) / eps;
+        }
+        std::cout << num_jacobian_pose << std::endl << std::endl;
+    }
+
+    Eigen::Vector3d curr_point, last_point_a, last_point_b;
+};
+
+class LidarMapPlaneNormFactor: public ceres::SizedCostFunction<1, 7>
+{
+public:
+    LidarMapPlaneNormFactor(const Eigen::Vector3d &curr_point_, const Eigen::Vector3d &plane_unit_norm_,
+                        double negative_OA_dot_norm_) : curr_point(curr_point_), plane_unit_norm(plane_unit_norm_),
+        negative_OA_dot_norm(negative_OA_dot_norm_) {}
+
+    virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
+    {
+        Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
+        Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+        Eigen::Vector3d norm = plane_unit_norm;
+        Eigen::Vector3d point_w = q_w_curr * curr_point + t_w_curr;
+
+        residuals[0] = norm.dot(point_w) + negative_OA_dot_norm;
+
+        if (jacobians) {
+            if (jacobians[0]) {
+                Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>> jacobian_pose(jacobians[0]);
+                jacobian_pose.setZero();
+                jacobian_pose.leftCols<3>() = norm.transpose();
+                jacobian_pose.block<1, 3>(0, 3) = -norm.transpose() * utils::skew(q_w_curr * curr_point);
+            }
+        }
+        return true;
+    }
+
+    void check(double **parameters)
+    {
+        double *res = new double[1];
+        double **jaco = new double *[1];
+        jaco[0] = new double[1 * 7];
+        Evaluate(parameters, res, jaco);
+        puts("check begin");
+        puts("my");
+
+        std::cout << Eigen::Map<Eigen::Matrix<double, 1, 1>>(res).transpose() << std::endl << std::endl;
+        std::cout << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[0]) << std::endl << std::endl;
+
+        Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
+        Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+        Eigen::Vector3d norm = plane_unit_norm;
+        Eigen::Vector3d point_w = q_w_curr * curr_point + t_w_curr;
+
+        Eigen::Matrix<double, 1, 1> residual;
+        residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( norm.dot(point_w) + negative_OA_dot_norm );
+
+        puts("num");
+        std::cout << residual.transpose() << std::endl <<  std::endl;
+
+        const double eps = 1e-6;
+        Eigen::Matrix<double, 1, 7> num_jacobian_pose;
+        for (int k = 0; k < 6; k++) {
+            Eigen::Vector3d t_w_curr_new{parameters[0][0], parameters[0][1], parameters[0][2]};
+            Eigen::Quaterniond q_w_curr_new{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
+
+            int a = k / 3, b = k % 3;
+            Eigen::Vector3d delta = Eigen::Vector3d(b == 0, b == 1, b == 2) * eps;
+
+            if (a == 0) {
+                t_w_curr_new += delta;
+            }
+            else if (a == 1) {
+                q_w_curr_new = utils::deltaQ(delta) * q_w_curr_new;
+            }
+
+            Eigen::Vector3d point_w = q_w_curr_new * curr_point + t_w_curr_new;
+
+            Eigen::Matrix<double, 1, 1> tmp_residual;
+            tmp_residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( norm.dot(point_w) + negative_OA_dot_norm );
+
+            num_jacobian_pose.col(k) = (tmp_residual - residual) / eps;
+        }
+        std::cout << num_jacobian_pose << std::endl << std::endl;
+    }
+
+    Eigen::Vector3d curr_point;
+    Eigen::Vector3d plane_unit_norm;
+    double negative_OA_dot_norm;
+};

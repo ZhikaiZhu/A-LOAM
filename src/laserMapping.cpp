@@ -63,6 +63,7 @@
 #include "aloam_velodyne/tic_toc.h"
 #include "aloam_velodyne/map_viewer.hpp"
 #include "aloam_velodyne/parameters.h"
+#include "aloam_velodyne/pose_local_parameterization.hpp"
 
 using namespace parameter;
 using namespace utils;
@@ -76,6 +77,14 @@ double timeLaserCloudSurfLast = 0;
 double timeLaserCloudFullRes = 0;
 double timeLaserOdometry = 0;
 
+// dynamic object filter
+const int max_allow_residual_block = 1e4;
+int corner_avail_num = 0;
+int surf_avail_num = 0;
+int corner_reject_num = 0;
+int surf_reject_num = 0;
+double inlier_ratio = 0.9;
+double inlier_dis = 0.02;
 
 int laserCloudCenWidth = 10;
 int laserCloudCenHeight = 10;
@@ -91,10 +100,6 @@ const int laserCloudNum = laserCloudWidth * laserCloudHeight * laserCloudDepth; 
 int laserCloudValidInd[125];
 int laserCloudSurroundInd[125];
 
-// The number of features
-int cnt = 0.0;
-double cornerPoints = 0.0;
-double surfPoints = 0.0;
 
 // Result save
 std::string RESULT_PATH, PCD_PATH;
@@ -122,9 +127,9 @@ pcl::PointCloud<PointType>::Ptr laserCloudSurfArray[laserCloudNum];
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeCornerFromMap(new pcl::KdTreeFLANN<PointType>());
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeSurfFromMap(new pcl::KdTreeFLANN<PointType>());
 
-double parameters[7] = {0, 0, 0, 1, 0, 0, 0};
-Eigen::Map<Eigen::Quaterniond> q_w_curr(parameters);
-Eigen::Map<Eigen::Vector3d> t_w_curr(parameters + 4);
+double parameters[7] = {0, 0, 0, 0, 0, 0, 1};
+Eigen::Map<Eigen::Quaterniond> q_w_curr(parameters + 3);
+Eigen::Map<Eigen::Vector3d> t_w_curr(parameters);
 
 // wmap_T_odom * odom_T_curr = wmap_T_curr;
 // transformation between odom's world and map's world frame
@@ -564,12 +569,6 @@ void process()
 			downSizeFilterSurf.filter(*laserCloudSurfStack);
 			int laserCloudSurfStackNum = laserCloudSurfStack->points.size();
 
-			// calculate features
-			++cnt;
-			cornerPoints += laserCloudCornerStackNum;
-			surfPoints += laserCloudSurfStackNum;
-			//printf("Map input (DS) corner and surf points size: %f %f \n", cornerPoints / cnt, surfPoints / cnt);
-
 			//printf("map prepare time %f ms\n", t_shift.toc());
 			//printf("map corner num %d  surf num %d \n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum);
 			if (laserCloudCornerFromMapNum > 10 && laserCloudSurfFromMapNum > 50)
@@ -582,18 +581,28 @@ void process()
 
 				for (int iterCount = 0; iterCount < 2; iterCount++)
 				{
+					pointSearchInd.clear();
+					pointSearchSqDis.clear();
+					corner_avail_num = 0;
+					surf_avail_num = 0;
+					corner_reject_num = 0;
+					surf_reject_num = 0;
+
 					//ceres::LossFunction *loss_function = NULL;
 					ceres::LossFunction *loss_function = new ceres::HuberLoss(0.1);
-					ceres::LocalParameterization *q_parameterization =
-						new ceres::EigenQuaternionParameterization();
+					//ceres::LocalParameterization *q_parameterization = new ceres::EigenQuaternionParameterization();
+					ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
 					ceres::Problem::Options problem_options;
 
+					ceres::ResidualBlockId block_id;
+					std::vector<ceres::ResidualBlockId> residual_block_ids;
+
 					ceres::Problem problem(problem_options);
-					problem.AddParameterBlock(parameters, 4, q_parameterization);
-					problem.AddParameterBlock(parameters + 4, 3);
+					//problem.AddParameterBlock(parameters, 4, q_parameterization);
+					//problem.AddParameterBlock(parameters + 4, 3);
+					problem.AddParameterBlock(parameters, 7, local_parameterization);
 
 					TicToc t_data;
-					int corner_num = 0;
 
 					for (int i = 0; i < laserCloudCornerStackNum; i++)
 					{
@@ -602,7 +611,7 @@ void process()
 						pointAssociateToMap(&pointOri, &pointSel);
 						kdtreeCornerFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis); 
 
-						if (pointSearchSqDis[4] < 1.0)
+						if (pointSearchSqDis[4] < 2.0)
 						{ 
 							std::vector<Eigen::Vector3d> nearCorners;
 							Eigen::Vector3d center(0, 0, 0);
@@ -636,9 +645,15 @@ void process()
 								point_a = 0.1 * unit_direction + point_on_line;
 								point_b = -0.1 * unit_direction + point_on_line;
 
-								ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
-								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
-								corner_num++;	
+								//ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
+								//block_id = problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								LidarMapEdgeFactor *cost_function = new LidarMapEdgeFactor(curr_point, point_a, point_b);
+								block_id = problem.AddResidualBlock(cost_function, loss_function, parameters);
+								residual_block_ids.push_back(block_id);
+								corner_avail_num++;	
+							}
+							else {
+								corner_reject_num++;
 							}							
 						}
 						/*
@@ -660,7 +675,6 @@ void process()
 						*/
 					}
 
-					int surf_num = 0;
 					for (int i = 0; i < laserCloudSurfStackNum; i++)
 					{
 						pointOri = laserCloudSurfStack->points[i];
@@ -670,7 +684,7 @@ void process()
 
 						Eigen::Matrix<double, 5, 3> matA0;
 						Eigen::Matrix<double, 5, 1> matB0 = -1 * Eigen::Matrix<double, 5, 1>::Ones();
-						if (pointSearchSqDis[4] < 1.0)
+						if (pointSearchSqDis[4] < 50.0)
 						{
 							
 							for (int j = 0; j < 5; j++)
@@ -701,9 +715,15 @@ void process()
 							Eigen::Vector3d curr_point(pointOri.x, pointOri.y, pointOri.z);
 							if (planeValid)
 							{
-								ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
-								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
-								surf_num++;
+								//ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
+								//block_id = problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								LidarMapPlaneNormFactor *cost_function = new LidarMapPlaneNormFactor(curr_point, norm, negative_OA_dot_norm);
+								block_id = problem.AddResidualBlock(cost_function, loss_function, parameters);
+								residual_block_ids.push_back(block_id);
+								surf_avail_num++;
+							}
+							else {
+								surf_reject_num++;
 							}
 						}
 						/*
@@ -730,21 +750,65 @@ void process()
 
 					//printf("mapping data assosiation time %f ms \n", t_data.toc());
 
-					TicToc t_solver;
+					std::vector<ceres::ResidualBlockId> residual_block_ids_tmp;
+					residual_block_ids_tmp.reserve(residual_block_ids.size());
+					// drop some of residual to guaruntee the real time performance
+					if (residual_block_ids.size() > (size_t)max_allow_residual_block) {
+						residual_block_ids_tmp.clear();
+						double thresh_to_reserve = max_allow_residual_block / (double)residual_block_ids.size();
+						double *prob_to_drop = rand_array_uniform(0.0, 1.0, residual_block_ids.size());
+						for (size_t i = 0; i < residual_block_ids.size(); ++i) {
+							if (prob_to_drop[i] > thresh_to_reserve) {
+								problem.RemoveResidualBlock(residual_block_ids[i]);
+							}
+							else {
+								residual_block_ids_tmp.push_back(residual_block_ids[i]);
+							}
+						}
+						residual_block_ids = residual_block_ids_tmp;
+						delete prob_to_drop;
+					}
+
 					ceres::Solver::Options options;
+					ceres::Solver::Summary summary;
+					for (int j = 0; j < 1; ++j) {
+						options.linear_solver_type = ceres::DENSE_QR;
+						options.max_num_iterations = 2;
+						options.check_gradients = false;
+						options.gradient_check_relative_precision = 1e-4;
+						ceres::Solve(options, &problem, &summary);
+
+						residual_block_ids_tmp.clear();
+						ceres::Problem::EvaluateOptions eval_options;
+						eval_options.residual_blocks = residual_block_ids;
+						double total_cost = 0.0;
+						std::vector<double> residuals;
+						problem.Evaluate(eval_options, &total_cost, &residuals, nullptr, nullptr);
+
+						std::set<double> dis_vec;
+						for (size_t i = 0; i < residuals.size(); ++i) {
+							dis_vec.insert(std::fabs(residuals[i]));
+						}
+						double inlier_ratio_thresh = *(std::next(dis_vec.begin(), (int)(inlier_ratio * dis_vec.size())));
+						double inlier_thresh = std::max(inlier_ratio, inlier_ratio_thresh);
+						for (size_t i = 0; i < residual_block_ids.size(); ++i) {
+							if (std::fabs(residuals[i])  > inlier_thresh) {
+								problem.RemoveResidualBlock(residual_block_ids[i]);
+							}
+							else {
+								residual_block_ids_tmp.push_back(residual_block_ids[i]);
+							}
+						} 
+						residual_block_ids = residual_block_ids_tmp;
+					}
+
 					options.linear_solver_type = ceres::DENSE_QR;
 					options.max_num_iterations = 4;
 					options.minimizer_progress_to_stdout = false;
 					options.check_gradients = false;
 					options.gradient_check_relative_precision = 1e-4;
-					ceres::Solver::Summary summary;
 					ceres::Solve(options, &problem, &summary);
-					//printf("mapping solver time %f ms \n", t_solver.toc());
 
-					//printf("time %f \n", timeLaserOdometry);
-					//printf("corner factor num %d surf factor num %d\n", corner_num, surf_num);
-					//printf("result q %f %f %f %f result t %f %f %f\n", parameters[3], parameters[0], parameters[1], parameters[2],
-					//	   parameters[4], parameters[5], parameters[6]);
 				}
 				opt_time += t_opt.toc();
 				//printf("mapping optimization time %f ms \n", opt_time / (frameCount + 1));
