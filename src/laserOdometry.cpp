@@ -63,7 +63,7 @@ using namespace parameter;
 using namespace utils;
 using namespace filter;
 
-#define DISTORTION 0
+#define DISTORTION 1
 
 
 constexpr double NEARBY_SCAN = 2.5;
@@ -406,12 +406,12 @@ void findCorrespondingCornerFeatures(ScanPtr lastScan, ScanPtr newScan,
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                /*ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
+                ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
                                                                                   nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
-                LidarEdgeFactorExSF *cost_function = new LidarEdgeFactorExSF(curr_point, P1, P2, s, nominalState->rn_, 
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);
+                /*LidarEdgeFactorExSF *cost_function = new LidarEdgeFactorExSF(curr_point, P1, P2, s, nominalState->rn_, 
                                                                              nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); 
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
             }
         }
     }
@@ -552,12 +552,12 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                /*ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
+                ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
                                                                                    nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
-                LidarPlaneFactorExSF *cost_function = new LidarPlaneFactorExSF(curr_point, P1, P2, P3, s, nominalState->rn_,
-                                                                               nominalState->qbn_, LIDAR_STD / w);
                 problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); 
+                /*LidarPlaneFactorExSF *cost_function = new LidarPlaneFactorExSF(curr_point, P1, P2, P3, s, nominalState->rn_,
+                                                                               nominalState->qbn_, LIDAR_STD / w);
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
             }
         }
     }
@@ -616,9 +616,9 @@ bool calculateTransformation(ScanPtr lastScan, ScanPtr newScan,
 
         V3D jacobian1xyz =
             coff_xyz.transpose() *
-            (-R21xyz.toRotationMatrix() * skew(P2xyz));  // rotation jacobian
+            (-q_b_l.inverse().toRotationMatrix() * R21xyz.toRotationMatrix() * skew(q_b_l * P2xyz + t_b_l));  // rotation jacobian
         V3D jacobian2xyz =
-            coff_xyz.transpose() * M3D::Identity();  // translation jacobian
+            coff_xyz.transpose() * M3D::Identity() * q_b_l.inverse().toRotationMatrix();  // translation jacobian
         double residual = coeff.intensity;
 
         J.block<1, 3>(i, O_R) = jacobian1xyz;
@@ -742,8 +742,8 @@ void transformFromInertialToLidar(){
 
 void calculateRPfromIMU(const V3D& acc, double& roll, double& pitch) {
     pitch = -sign(acc.z()) * asin(acc.x() / G0);
-    //roll = sign(acc.z()) * asin(acc.y() / G0);
-    roll = atan(acc.y() / acc.z());
+    roll = sign(acc.z()) * asin(acc.y() / (G0 * cos(pitch)));
+    //roll = atan(acc.y() / acc.z());
 }
 
 void correctRollPitch(const double &roll, const double &pitch) {
@@ -851,6 +851,7 @@ void performIESKF() {
             if (hasConverged || iter == NUM_ITER / CERES_MAX_ITER) {
                 ceres::Covariance::Options cov_options;
                 cov_options.algorithm_type = ceres::DENSE_SVD;
+                cov_options.num_threads = 4;
                 ceres::Covariance covariance(cov_options);
                 std::vector<std::pair<const double*, const double*> > covariance_blocks;
                 if (!CALIB_EXTRINSIC) {
@@ -945,6 +946,8 @@ void performIESKF() {
                 filter_->update(linState_, Pk_);
                 filter_->state_.q_ex_ = q_b_l;
                 filter_->state_.t_ex_ = t_b_l;
+                //Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(Pk_);
+                //td::cout << solver.eigenvalues().transpose() << std::endl;
             }
         }
 
@@ -1346,12 +1349,12 @@ int main(int argc, char **argv)
             if (systemInited && !is_first_scan)
             {
                 scan_time_ = timeLaserCloudFullRes;
-                /*mBuf.lock();
+                mBuf.lock();
                 auto it = imuBuf.crbegin();
                 mBuf.unlock();
                 if ((*it)->header.stamp.toSec() < scan_time_) {
                     continue;
-                } */
+                } 
                 
                 int used_imu_msg = 0;
                 mBuf.lock();
@@ -1389,7 +1392,7 @@ int main(int argc, char **argv)
                 performIESKF();
 
                 opt_time += t_opt.toc();
-                printf("optimization time %f ms \n", opt_time / (frameCount + 1));
+                //printf("optimization time %f ms \n", opt_time / (frameCount + 1));
 
                 integrateTransformation();
                 filter_->reset(1);

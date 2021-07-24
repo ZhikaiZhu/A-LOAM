@@ -65,21 +65,37 @@ using std::sin;
 const int systemDelay = 0; 
 int systemInitCount = 0;
 bool systemInited = false;
-float cloudCurvature[40000];
-int cloudSortInd[40000];
-int cloudNeighborPicked[40000];
-int cloudLabel[40000];
+float cloudCurvature[100000];
+int cloudSortInd[100000];
+int cloudNeighborPicked[100000];
+int cloudLabel[100000];
 
-// The number of features
-int count = 0.0;
-double cornerPoints = 0.0;
-double cornerPointsLess = 0.0;
-double surfPoints = 0.0;
-double surfPointsLess = 0.0;  
+pcl::PointCloud<PointType>::Ptr fullCloud;
+pcl::PointCloud<PointType>::Ptr groundCloud;
+pcl::PointCloud<PointType>::Ptr segmentedCloud;
+pcl::PointCloud<PointType>::Ptr laserCloud;
+
+cv::Mat rangeMat;
+cv::Mat labelMat;
+cv::Mat groundMat;
+int labelCount;
+std::vector<bool> segmentedCloudGroundFlag;
+std::vector<int> scanStartInd;
+std::vector<int> scanEndInd;
+
+std::vector<std::pair<uint8_t, uint8_t> > neighborIterator;
+
+uint16_t* allPushedIndX;
+uint16_t* allPushedIndY;
+
+uint16_t* queueIndX;
+uint16_t* queueIndY;
 
 bool comp (int i,int j) { return (cloudCurvature[i]<cloudCurvature[j]); }
 
 ros::Publisher pubLaserCloud;
+ros::Publisher pubGroundCloud;
+ros::Publisher pubSegmentedCloud;
 ros::Publisher pubCornerPointsSharp;
 ros::Publisher pubCornerPointsLessSharp;
 ros::Publisher pubSurfPointsFlat;
@@ -88,6 +104,57 @@ ros::Publisher pubRemovePoints;
 std::vector<ros::Publisher> pubEachScan;
 
 bool PUB_EACH_LINE = false;
+
+void initialization() {
+    fullCloud.reset(new pcl::PointCloud<PointType>());
+    groundCloud.reset(new pcl::PointCloud<PointType>());
+    segmentedCloud.reset(new pcl::PointCloud<PointType>());
+    laserCloud.reset(new pcl::PointCloud<PointType>());
+
+    fullCloud->points.resize(N_SCANS * SCAN_NUM);
+    segmentedCloudGroundFlag.assign(N_SCANS * SCAN_NUM, false);
+    scanStartInd.assign(N_SCANS, 0);
+    scanEndInd.assign(N_SCANS, 0);
+
+    std::pair<int8_t, int8_t> neighbor;
+    neighbor.first = -1;
+    neighbor.second = 0;
+    neighborIterator.push_back(neighbor);
+    neighbor.first = 0;
+    neighbor.second = 1;
+    neighborIterator.push_back(neighbor);
+    neighbor.first = 0;
+    neighbor.second = -1;
+    neighborIterator.push_back(neighbor);
+    neighbor.first = 1;
+    neighbor.second = 0;
+    neighborIterator.push_back(neighbor);
+
+    allPushedIndX = new uint16_t[N_SCANS * SCAN_NUM];
+    allPushedIndY = new uint16_t[N_SCANS * SCAN_NUM];
+
+    queueIndX = new uint16_t[N_SCANS * SCAN_NUM];
+    queueIndY = new uint16_t[N_SCANS * SCAN_NUM];
+
+}
+
+void resetParameters() {
+    groundCloud->clear();
+    segmentedCloud->clear();
+    laserCloud->clear();
+
+    rangeMat = cv::Mat(N_SCANS, SCAN_NUM, CV_32F, cv::Scalar::all(FLT_MAX));
+    groundMat = cv::Mat(N_SCANS, SCAN_NUM, CV_8S, cv::Scalar::all(0));
+    labelMat = cv::Mat(N_SCANS, SCAN_NUM, CV_32S, cv::Scalar::all(0));
+    labelCount = 1;
+
+    PointType nanPoint;
+    nanPoint.x = std::numeric_limits<float>::quiet_NaN();
+    nanPoint.y = std::numeric_limits<float>::quiet_NaN();
+    nanPoint.z = std::numeric_limits<float>::quiet_NaN();
+    nanPoint.intensity = -1;
+    std::fill(fullCloud->points.begin(), fullCloud->points.end(), nanPoint);
+}
 
 template <typename PointT>
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
@@ -103,7 +170,9 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
 
     for (size_t i = 0; i < cloud_in.points.size(); ++i)
     {
-        float dis = std::sqrt(cloud_in.points[i].x * cloud_in.points[i].x + cloud_in.points[i].y * cloud_in.points[i].y);
+        float dis = std::sqrt(cloud_in.points[i].x * cloud_in.points[i].x + 
+                              cloud_in.points[i].y * cloud_in.points[i].y + 
+                              cloud_in.points[i].z + cloud_in.points[i].z);
         if ( dis < thres1 || dis > thres2)
             continue;
         cloud_out.points[j] = cloud_in.points[i];
@@ -118,6 +187,178 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
     cloud_out.width = static_cast<uint32_t>(j);
     cloud_out.is_dense = true;
 }
+
+void groundRemoval() {
+    size_t lowerInd, upperInd;
+    float diffX, diffY, diffZ, angle;
+
+    for (size_t j = 0; j < SCAN_NUM; ++j) {
+        for (size_t i = 0; i < groundScanInd; ++i) {
+            lowerInd = j + i * SCAN_NUM;
+            upperInd = j + (i + 1) * SCAN_NUM;
+
+            if (fullCloud->points[lowerInd].intensity == -1 ||
+                fullCloud->points[upperInd].intensity == -1) {
+                groundMat.at<int8_t>(i, j) = -1;
+                continue;
+            }
+
+            diffX = fullCloud->points[upperInd].x - fullCloud->points[lowerInd].x;
+            diffY = fullCloud->points[upperInd].y - fullCloud->points[lowerInd].y;
+            diffZ = fullCloud->points[upperInd].z - fullCloud->points[lowerInd].z;
+
+            angle = atan2(diffZ, sqrt(diffX * diffX + diffY * diffY)) * 180 / M_PI;
+
+            if (abs(angle - sensorMountAngle) <= 10) {
+                groundMat.at<int8_t>(i, j) = 1;
+                groundMat.at<int8_t>(i + 1, j) = 1;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < N_SCANS; ++i) {
+        for (size_t j = 0; j < SCAN_NUM; ++j) {
+            if (groundMat.at<int8_t>(i, j) == 1 || rangeMat.at<float>(i, j) == FLT_MAX) {
+                labelMat.at<int>(i, j) = -1;
+            }
+        }
+    }
+    if (pubGroundCloud.getNumSubscribers() != 0) {
+        for (size_t i = 0; i <= groundScanInd; ++i) {
+            for (size_t j = 0; j < SCAN_NUM; ++j) {
+                if (groundMat.at<int8_t>(i, j) == 1)
+                    groundCloud->push_back(fullCloud->points[j + i * SCAN_NUM]);
+            }
+        }
+    }
+}
+
+void labelComponents(int row, int col) {
+    float d1, d2, alpha, angle;
+    int fromIndX, fromIndY, thisIndX, thisIndY;
+    bool lineCountFlag[N_SCANS] = {false};
+
+    queueIndX[0] = row;
+    queueIndY[0] = col;
+    int queueSize = 1;
+    int queueStartInd = 0;
+    int queueEndInd = 1;
+
+    allPushedIndX[0] = row;
+    allPushedIndY[0] = col;
+    int allPushedIndSize = 1;
+
+    while (queueSize > 0) {
+        fromIndX = queueIndX[queueStartInd];
+        fromIndY = queueIndY[queueStartInd];
+        --queueSize;
+        ++queueStartInd;
+        labelMat.at<int>(fromIndX, fromIndY) = labelCount;
+
+        for (auto iter = neighborIterator.begin(); iter != neighborIterator.end(); ++iter) {
+            thisIndX = fromIndX + (*iter).first;
+            thisIndY = fromIndY + (*iter).second;
+
+            if (thisIndX < 0 || thisIndX >= N_SCANS) continue;
+
+            if (thisIndY < 0) thisIndY = SCAN_NUM - 1;
+            if (thisIndY >= SCAN_NUM) thisIndY = 0;
+
+            if (labelMat.at<int>(thisIndX, thisIndY) != 0) continue;
+
+            d1 = std::max(rangeMat.at<float>(fromIndX, fromIndY),
+                          rangeMat.at<float>(thisIndX, thisIndY));
+            d2 = std::min(rangeMat.at<float>(fromIndX, fromIndY),
+                          rangeMat.at<float>(thisIndX, thisIndY));
+
+            if ((*iter).first == 0)
+                alpha = segmentAlphaX;
+            else
+                alpha = segmentAlphaY;
+
+            angle = atan2(d2 * sin(alpha), (d1 - d2 * cos(alpha)));
+
+            if (angle > segmentTheta) {
+                queueIndX[queueEndInd] = thisIndX;
+                queueIndY[queueEndInd] = thisIndY;
+                ++queueSize;
+                ++queueEndInd;
+
+                labelMat.at<int>(thisIndX, thisIndY) = labelCount;
+                lineCountFlag[thisIndX] = true;
+
+                allPushedIndX[allPushedIndSize] = thisIndX;
+                allPushedIndY[allPushedIndSize] = thisIndY;
+                ++allPushedIndSize;
+            }
+        }
+    }
+
+    bool feasibleSegment = false;
+    if (allPushedIndSize >= 30)
+        feasibleSegment = true;
+    else if (allPushedIndSize >= segmentValidPointNum) {
+        int lineCount = 0;
+        for (size_t i = 0; i < N_SCANS; ++i)
+            if (lineCountFlag[i] == true) ++lineCount;
+        if (lineCount >= segmentValidLineNum) 
+            feasibleSegment = true;
+    }
+
+    if (feasibleSegment == true) {
+        ++labelCount;
+    } 
+    else {
+        for (size_t i = 0; i < allPushedIndSize; ++i) {
+            labelMat.at<int>(allPushedIndX[i], allPushedIndY[i]) = 999999;
+        }
+    }
+}
+
+void cloudSegmentation() {
+    for (size_t i = 0; i < N_SCANS; ++i)
+        for (size_t j = 0; j < SCAN_NUM; ++j)
+            if (labelMat.at<int>(i, j) == 0) labelComponents(i, j);
+
+    int sizeOfSegCloud = 0;
+    for (size_t i = 0; i < N_SCANS; ++i) {
+        scanStartInd[i] = sizeOfSegCloud + 5;
+
+        for (size_t j = 0; j < SCAN_NUM; ++j) {
+            if (labelMat.at<int>(i, j) > 0 || groundMat.at<int8_t>(i, j) == 1) {
+                if (labelMat.at<int>(i, j) == 999999) {
+                    if (i > groundScanInd && j % 5 == 0) {
+                        laserCloud->push_back(fullCloud->points[j + i * SCAN_NUM]);
+                        ++sizeOfSegCloud;
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+                if (groundMat.at<int8_t>(i, j) == 1) {
+                    if (j % 5 != 0 && j > 5 && j < SCAN_NUM - 5) continue;
+                }
+                segmentedCloudGroundFlag[sizeOfSegCloud] = (groundMat.at<int8_t>(i, j) == 1);
+                laserCloud->push_back(fullCloud->points[j + i * SCAN_NUM]);
+                ++sizeOfSegCloud;
+            }
+        }
+
+        scanEndInd[i] = sizeOfSegCloud - 1 - 5;
+    }
+
+    if (pubSegmentedCloud.getNumSubscribers() != 0) {
+        for (size_t i = 0; i < N_SCANS; ++i) {
+            for (size_t j = 0; j < SCAN_NUM; ++j) {
+                if (labelMat.at<int>(i, j) > 0 && labelMat.at<int>(i, j) != 999999) {
+                    segmentedCloud->push_back(fullCloud->points[j + i * SCAN_NUM]);
+                    segmentedCloud->points.back().intensity = labelMat.at<int>(i, j);
+                }
+            }
+        }
+    }
+}
+
 
 void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 {
@@ -134,8 +375,8 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 
     TicToc t_whole;
     TicToc t_prepare;
-    std::vector<int> scanStartInd(N_SCANS, 0);
-    std::vector<int> scanEndInd(N_SCANS, 0);
+    //std::vector<int> scanStartInd(N_SCANS, 0);
+    //std::vector<int> scanEndInd(N_SCANS, 0);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr laserCloudIn(new pcl::PointCloud<pcl::PointXYZ>());
     pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
@@ -250,14 +491,58 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     cloudSize = count;
     //printf("points size %d \n", cloudSize);
 
-    pcl::PointCloud<PointType>::Ptr laserCloud(new pcl::PointCloud<PointType>());
-    for (int i = 0; i < N_SCANS; i++)
-    { 
-        scanStartInd[i] = laserCloud->size() + 5;
-        *laserCloud += laserCloudScans[i];
-        scanEndInd[i] = laserCloud->size() - 6;
+    if (!OUT_DOOR) {
+        for (int i = 0; i < N_SCANS; i++) { 
+            scanStartInd[i] = laserCloud->size() + 5;
+            *laserCloud += laserCloudScans[i];
+            scanEndInd[i] = laserCloud->size() - 6;
+        }
     }
+    else {
+        pcl::PointCloud<PointType>::Ptr tmpCloud(new pcl::PointCloud<PointType>());
+        for (int i = 0; i < N_SCANS; i++) { 
+            *tmpCloud += laserCloudScans[i];
+        }
 
+        // project cloud to image
+        float verticalAngle, horizonAngle, range;
+        size_t rowIdn, columnIdn, index;
+        PointType thisPoint;
+
+        for (size_t i = 0; i < cloudSize; ++i) {
+            thisPoint.x = tmpCloud->points[i].x;
+            thisPoint.y = tmpCloud->points[i].y;
+            thisPoint.z = tmpCloud->points[i].z;
+            thisPoint.intensity = tmpCloud->points[i].intensity;
+
+            verticalAngle = atan2(thisPoint.z, sqrt(thisPoint.x * thisPoint.x +
+                                                    thisPoint.y * thisPoint.y)) * 180 / M_PI;
+            rowIdn = (verticalAngle + ang_bottom) / ang_res_y;
+            if (rowIdn < 0 || rowIdn >= N_SCANS) continue;
+
+            horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
+
+            columnIdn = -round((horizonAngle - 90.0) / ang_res_x) + SCAN_NUM / 2;
+            if (columnIdn >= SCAN_NUM) columnIdn -= SCAN_NUM;
+
+            if (columnIdn < 0 || columnIdn >= SCAN_NUM) continue;
+
+            range = sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y +
+                        thisPoint.z * thisPoint.z);
+            rangeMat.at<float>(rowIdn, columnIdn) = range;
+
+            //thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
+
+            index = columnIdn + rowIdn * SCAN_NUM;
+            fullCloud->points[index] = thisPoint;
+        }
+
+        groundRemoval();
+
+        cloudSegmentation();
+        cloudSize = laserCloud->points.size();
+    }
+    
     //printf("prepare time %f \n", t_prepare.toc());
 
     for (int i = 5; i < cloudSize - 5; i++)
@@ -354,7 +639,8 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
                 int ind = cloudSortInd[k]; 
 
                 if (cloudNeighborPicked[ind] == 0 &&
-                    cloudCurvature[ind] > EDGE_THRESHOLD)
+                    cloudCurvature[ind] > EDGE_THRESHOLD &&
+                    segmentedCloudGroundFlag[ind] == false)
                 {
 
                     largestPickedNum++;
@@ -501,6 +787,21 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     surfPointsLessFlat2.header.frame_id = "/camera_init";
     pubSurfPointsLessFlat.publish(surfPointsLessFlat2);
 
+    sensor_msgs::PointCloud2 laserCloudTemp;
+    if (pubGroundCloud.getNumSubscribers() != 0) {
+        pcl::toROSMsg(*groundCloud, laserCloudTemp);
+        laserCloudTemp.header.stamp = laserCloudMsg->header.stamp;
+        laserCloudTemp.header.frame_id = "/camera_init";
+        pubGroundCloud.publish(laserCloudTemp);
+    }
+
+    if (pubSegmentedCloud.getNumSubscribers() != 0) {
+        pcl::toROSMsg(*segmentedCloud, laserCloudTemp);
+        laserCloudTemp.header.stamp = laserCloudMsg->header.stamp;
+        laserCloudTemp.header.frame_id = "/camera_init";
+        pubSegmentedCloud.publish(laserCloudTemp);
+    }
+
     // pub each scam
     if(PUB_EACH_LINE)
     {
@@ -513,6 +814,8 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
             pubEachScan[i].publish(scanMsg);
         }
     }
+
+    resetParameters();
 
     //printf("scan registration time %f ms *************\n", t_whole.toc());
     if(t_whole.toc() > 100)
@@ -534,9 +837,17 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    initialization();
+
+    resetParameters();
+
     ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(LIDAR_TOPIC, 100, laserCloudHandler);
 
     pubLaserCloud = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
+
+    pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2>("/ground_cloud", 100);
+
+    pubSegmentedCloud = nh.advertise<sensor_msgs::PointCloud2>("/segmented_cloud", 100);
 
     pubCornerPointsSharp = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 100);
 

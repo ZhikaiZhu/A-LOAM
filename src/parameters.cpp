@@ -55,6 +55,7 @@ int SAVE_PCD_MAP;
 int PURE_IMU;
 int CALIB_EXTRINSIC;
 //int EKF_UPDATE;
+int OUT_DOOR;
 
 // !@KALMAN_FILTER
 double ACC_N;
@@ -125,6 +126,7 @@ void readParameters(ros::NodeHandle& n) {
   PURE_IMU = fsSettings["pure_imu"];
   CALIB_EXTRINSIC = fsSettings["calib_extrinsic"];
   //EKF_UPDATE = fsSettings["ekf_update"];
+  OUT_DOOR = fsSettings["out_door"];
 
   fsSettings["imu_topic"] >> IMU_TOPIC;
   fsSettings["lidar_topic"] >> LIDAR_TOPIC;

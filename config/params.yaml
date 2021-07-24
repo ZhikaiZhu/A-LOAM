@@ -5,8 +5,8 @@ calibrate_imu: 0  # 0: no imu calibration and use default values. 1: calibrate i
 n_scans: 16 
 scan_num: 1800
 scan_period: 0.1
-minimum_range: 0.3
-maximum_range: 90.0
+minimum_range: 0.5
+maximum_range: 1000.0
 edge_threshold: 0.1
 surf_threshold: 0.1
 distance_sq_threshold: 25
@@ -14,8 +14,8 @@ map_corner_res: 0.2
 map_surf_res: 0.4
 map_surr_kf_res: 0.8
 dis_keyframes: 1.0
-ori_keyframes: 30.0
-surrounding_kf_radius: 80.0
+ori_keyframes: 15.0
+surrounding_kf_radius: 100.0
 globalmap_kf_radius: 1000.0
 skip_frame_num: 1
 icp_freq: 1
@@ -31,12 +31,13 @@ save_pcd_map: 0
 pure_imu: 0
 calib_extrinsic: 0
 #ekf_update: 0
+out_door: 1
 
 # topic names
-imu_topic: "/lips_sim/data_imu"
-lidar_topic: "/lips_sim/data_cloud"
-#imu_topic: "/imu/data"
-#lidar_topic: "/velodyne_points"
+#imu_topic: "/lips_sim/data_imu"
+#lidar_topic: "/lips_sim/data_cloud"
+imu_topic: "/imu_correct"
+lidar_topic: "/points_raw"
 output_path: "/home/spc/output"
 
 # noice parameters
@@ -44,6 +45,10 @@ acc_n: 3.9939570888238808e-03
 gyr_n: 1.5636343949698187e-03
 acc_w: 6.4356659353532566e-05
 gyr_w: 3.5640318696367613e-05
+#gyr_n: 3.1763097460294331e-03
+#gyr_w: 5.2271879084476391e-05
+#acc_n: 1.1177094599179057e-03
+#acc_w: 1.4629862958923388e-05
 
 init_pos_std: !!opencv-matrix
    rows: 3
@@ -55,7 +60,7 @@ init_vel_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.15, 0.15, 0.15]
+   data: [0.0, 0.0, 0.0]
 
 init_att_std: !!opencv-matrix
    rows: 3
@@ -67,13 +72,15 @@ init_acc_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.1, 0.1, 0.1]
+   data: #[0.1, 0.1, 0.1]
+         [0.01, 0.01, 0.02]
       
 init_gyr_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: [0.01, 0.01, 0.01]
+   data: #[0.01, 0.01, 0.01]
+         [0.002, 0.002, 0.002]
   
 # initial IMU biases
 init_ba: !!opencv-matrix

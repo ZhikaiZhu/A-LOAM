@@ -272,6 +272,7 @@ class StatePredictor {
         Gt.block<3, 3>(GlobalState::gyr_, 9) = M3D::Identity();
         //Gt = Gt * dt;
       }
+      //Gt = Gt * dt;
 
       const MXD I =
           MXD::Identity(GlobalState::DIM_OF_STATE_, GlobalState::DIM_OF_STATE_);
