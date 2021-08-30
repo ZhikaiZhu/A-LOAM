@@ -4,7 +4,7 @@
     <param name="mapping_skip_frame" type="int" value="1" />
 
     <!-- Config Path -->
-    <arg name="config_path" default="$(find aloam_velodyne)/config/params.yaml" />
+    <arg name="config_path" default="$(find aloam_velodyne)/config/config_indoor.yaml" />
     
     
     <node pkg="aloam_velodyne" type="apointProcess" name="apointProcess" output="screen">

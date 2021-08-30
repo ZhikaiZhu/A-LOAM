@@ -51,6 +51,7 @@
 #include <eigen3/Eigen/Dense>
 #include <mutex>
 #include <queue>
+#include <omp.h>
 
 #include "aloam_velodyne/common.h"
 #include "aloam_velodyne/tic_toc.h"
@@ -62,9 +63,6 @@
 using namespace parameter;
 using namespace utils;
 using namespace filter;
-
-#define DISTORTION 1
-
 
 constexpr double NEARBY_SCAN = 2.5;
 
@@ -83,6 +81,14 @@ double timeLaserCloudFullRes = 0;
 
 // Result save
 std::string RESULT_PATH;
+
+// Transform XYZ-convention to YZX-convention
+Eigen::Matrix3d R_yzx_to_xyz, R_xyz_to_yzx;
+Eigen::Quaterniond Q_yzx_to_xyz, Q_xyz_to_yzx;
+GlobalState globalStateYZX_;
+pcl::PointCloud<PointType>::Ptr cornerPointsLessSharpYZX(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr surfPointsLessFlatYZX(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr laserCloudFullResYZX(new pcl::PointCloud<PointType>());
 
 pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeCornerLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
 pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeSurfLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
@@ -196,28 +202,51 @@ void TransformToEnd(PointType const *const pi, PointType *const po)
 }
 
 void updatePointCloud() {
+    /*cornerPointsLessSharpYZX->clear();
+    surfPointsLessFlatYZX->clear();
+    laserCloudFullResYZX->clear();*/
+
+    //PointType point;
     int cornerPointsLessSharpNum = scan_new_->cornerPointsLessSharp_->points.size();
     for (int i = 0; i < cornerPointsLessSharpNum; i++) {
         TransformToEnd(&scan_new_->cornerPointsLessSharp_->points[i], 
                        &scan_new_->cornerPointsLessSharp_->points[i]);
+        /*point.x = scan_new_->cornerPointsLessSharp_->points[i].y;
+        point.y = scan_new_->cornerPointsLessSharp_->points[i].z;
+        point.z = scan_new_->cornerPointsLessSharp_->points[i].x;
+        point.intensity = scan_new_->cornerPointsLessSharp_->points[i].intensity;
+        cornerPointsLessSharpYZX->push_back(point);*/
     }
 
     int surfPointsLessFlatNum = scan_new_->surfPointsLessFlat_->points.size();
     for (int i = 0; i < surfPointsLessFlatNum; i++) {
         TransformToEnd(&scan_new_->surfPointsLessFlat_->points[i], 
                        &scan_new_->surfPointsLessFlat_->points[i]);
+        /*point.x = scan_new_->surfPointsLessFlat_->points[i].y;
+        point.y = scan_new_->surfPointsLessFlat_->points[i].z;
+        point.z = scan_new_->surfPointsLessFlat_->points[i].x;
+        point.intensity = scan_new_->surfPointsLessFlat_->points[i].intensity;
+        surfPointsLessFlatYZX->push_back(point);*/
     }
 
     int laserCloudFullResNum = scan_new_->laserCloudFullRes_->points.size();
     for (int i = 0; i < laserCloudFullResNum; i++) {
         TransformToEnd(&scan_new_->laserCloudFullRes_->points[i], 
                        &scan_new_->laserCloudFullRes_->points[i]);
+        /*point.x = scan_new_->laserCloudFullRes_->points[i].y;
+        point.y = scan_new_->laserCloudFullRes_->points[i].z;
+        point.z = scan_new_->laserCloudFullRes_->points[i].x;
+        point.intensity = scan_new_->laserCloudFullRes_->points[i].intensity;
+        laserCloudFullResYZX->push_back(point);*/
     }
 
     /*if (cornerPointsLessSharpNum >= 5 && surfPointsLessFlatNum >= 20) {
         kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
         kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
     } */
+    //globalStateYZX_.rn_ = Q_xyz_to_yzx * globalState_.rn_;
+    //globalStateYZX_.qbn_ = Q_xyz_to_yzx * globalState_.qbn_ * Q_yzx_to_xyz;
+
     kdtreeCornerLast->setInputCloud(scan_new_->cornerPointsLessSharp_);
     kdtreeSurfLast->setInputCloud(scan_new_->surfPointsLessFlat_);
 }
@@ -228,20 +257,23 @@ void publishTopics() {
 
         sensor_msgs::PointCloud2 laserCloudCornerLast2;
         pcl::toROSMsg(*scan_last_->cornerPointsLessSharp_, laserCloudCornerLast2);
+        //pcl::toROSMsg(*cornerPointsLessSharpYZX, laserCloudCornerLast2);
         laserCloudCornerLast2.header.stamp = ros::Time().fromSec(scan_time_);
-        laserCloudCornerLast2.header.frame_id = "/camera";
+        laserCloudCornerLast2.header.frame_id = "/camera_init";
         pubLaserCloudCornerLast.publish(laserCloudCornerLast2);
 
         sensor_msgs::PointCloud2 laserCloudSurfLast2;
         pcl::toROSMsg(*scan_last_->surfPointsLessFlat_, laserCloudSurfLast2);
+        //pcl::toROSMsg(*surfPointsLessFlatYZX, laserCloudSurfLast2);
         laserCloudSurfLast2.header.stamp = ros::Time().fromSec(scan_time_);
-        laserCloudSurfLast2.header.frame_id = "/camera";
+        laserCloudSurfLast2.header.frame_id = "/camera_init";
         pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
 
         sensor_msgs::PointCloud2 laserCloudFullRes3;
         pcl::toROSMsg(*scan_last_->laserCloudFullRes_, laserCloudFullRes3);
+        //pcl::toROSMsg(*laserCloudFullResYZX, laserCloudFullRes3);
         laserCloudFullRes3.header.stamp = ros::Time().fromSec(scan_time_);
-        laserCloudFullRes3.header.frame_id = "/camera";
+        laserCloudFullRes3.header.frame_id = "/camera_init";
         pubLaserCloudFullRes.publish(laserCloudFullRes3);
     }
 
@@ -250,13 +282,13 @@ void publishTopics() {
     laserOdometry.header.frame_id = "/camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = ros::Time().fromSec(scan_time_);
-    laserOdometry.pose.pose.orientation.x = globalStateLidar_.qbn_.x();
-    laserOdometry.pose.pose.orientation.y = globalStateLidar_.qbn_.y();
-    laserOdometry.pose.pose.orientation.z = globalStateLidar_.qbn_.z();
-    laserOdometry.pose.pose.orientation.w = globalStateLidar_.qbn_.w();
-    laserOdometry.pose.pose.position.x = globalStateLidar_.rn_[0];
-    laserOdometry.pose.pose.position.y = globalStateLidar_.rn_[1];
-    laserOdometry.pose.pose.position.z = globalStateLidar_.rn_[2];
+    laserOdometry.pose.pose.orientation.x = globalState_.qbn_.x();
+    laserOdometry.pose.pose.orientation.y = globalState_.qbn_.y();
+    laserOdometry.pose.pose.orientation.z = globalState_.qbn_.z();
+    laserOdometry.pose.pose.orientation.w = globalState_.qbn_.w();
+    laserOdometry.pose.pose.position.x = globalState_.rn_[0];
+    laserOdometry.pose.pose.position.y = globalState_.rn_[1];
+    laserOdometry.pose.pose.position.z = globalState_.rn_[2];
     pubLaserOdometry.publish(laserOdometry);
 
     geometry_msgs::PoseStamped laserPose;
@@ -406,12 +438,12 @@ void findCorrespondingCornerFeatures(ScanPtr lastScan, ScanPtr newScan,
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
+                /*ceres::CostFunction *cost_function = LidarEdgeStateFactorEx::Create(curr_point, P1, P2, s, nominalState->rn_, 
                                                                                   nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);
-                /*LidarEdgeFactorExSF *cost_function = new LidarEdgeFactorExSF(curr_point, P1, P2, s, nominalState->rn_, 
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);*/
+                LidarEdgeFactorExSF *cost_function = new LidarEdgeFactorExSF(curr_point, P1, P2, s, nominalState->rn_, 
                                                                              nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);
             }
         }
     }
@@ -531,11 +563,11 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
 
             double w = 1.0;
             if (iterCount >= ICP_FREQ) {
-                w = 1 - 1.8 * fabs(res) /
+                w = 1 - 0.9 * fabs(res) /
                               sqrt(sqrt(pointSel.x * pointSel.x + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
             }
 
-            if (w > 0.1 && res != 0) {
+            if (w > 0.4 && res != 0) {
                 coeff.x = w * jacxyz(0);
                 coeff.y = w * jacxyz(1);
                 coeff.z = w * jacxyz(2);
@@ -545,19 +577,19 @@ void findCorrespondingSurfFeatures(ScanPtr lastScan, ScanPtr newScan,
                 jacobianCoff->push_back(coeff);
             } 
 
-            if (w > 0.1 && res != 0 && problem != nullptr) {
+            if (w > 0.4 && res != 0 && problem != nullptr) {
                 double s;
                 if (DISTORTION)
                     s = (newScan->surfPointsFlat_->points[i].intensity - int(newScan->surfPointsFlat_->points[i].intensity)) / SCAN_PERIOD;
                 else
                     s = 1.0;
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(LOSS_THRESHOLD);
-                ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
+                /*ceres::CostFunction *cost_function = LidarPlaneStateFactorEx::Create(curr_point, P1, P2, P3, s, nominalState->rn_,
                                                                                    nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); 
-                /*LidarPlaneFactorExSF *cost_function = new LidarPlaneFactorExSF(curr_point, P1, P2, P3, s, nominalState->rn_,
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);*/
+                LidarPlaneFactorExSF *cost_function = new LidarPlaneFactorExSF(curr_point, P1, P2, P3, s, nominalState->rn_,
                                                                                nominalState->qbn_, LIDAR_STD / w);
-                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex); */
+                problem->AddResidualBlock(cost_function, loss_function, para_error_state, para_ex);
             }
         }
     }
@@ -742,8 +774,8 @@ void transformFromInertialToLidar(){
 
 void calculateRPfromIMU(const V3D& acc, double& roll, double& pitch) {
     pitch = -sign(acc.z()) * asin(acc.x() / G0);
-    roll = sign(acc.z()) * asin(acc.y() / (G0 * cos(pitch)));
-    //roll = atan(acc.y() / acc.z());
+    //roll = sign(acc.z()) * asin(acc.y() / (G0 * cos(pitch)));
+    roll = atan(acc.y() / acc.z());
 }
 
 void correctRollPitch(const double &roll, const double &pitch) {
@@ -758,7 +790,7 @@ void performIESKF() {
     GlobalState filterState = filter_->state_;
     linState_ = filterState;
 
-    double residualNorm = 1e6;
+    //double residualNorm = 1e6;
     bool hasConverged = false;
     bool hasDiverged = false;
     if (USE_CERES) {
@@ -771,6 +803,7 @@ void performIESKF() {
         options.max_solver_time_in_seconds = 0.04;
         options.max_num_iterations = CERES_MAX_ITER;
         options.linear_solver_type = ceres::DENSE_QR;
+        options.num_threads = 4;
         Eigen::Matrix<double, 18, 1> last_errorState = errorState;
         Q4D ex_rotation = q_b_l;
         V3D ex_translation = t_b_l;
@@ -858,7 +891,7 @@ void performIESKF() {
                     covariance_blocks.push_back(std::make_pair(para_error_state, para_error_state));
                     covariance.Compute(covariance_blocks, &problem);
                     Eigen::Matrix<double, 18, 18, Eigen::RowMajor> covariance_recovered;
-                    covariance.GetCovarianceBlockInTangentSpace(para_error_state, para_error_state, covariance_recovered.data());
+                    covariance.GetCovarianceBlock(para_error_state, para_error_state, covariance_recovered.data());
                     Pk_ = covariance_recovered;
                 }
                 else {
@@ -1111,6 +1144,7 @@ void initializeGravityAndBias() {
     V3D gravity = V3D(0.0, 0.0, -G);
     globalState_.setIdentity();
     globalStateLidar_.setIdentity();
+    //globalStateYZX_.setIdentity();
     linState_.setIdentity();
     Q4D q0 = Eigen::Quaterniond::FromTwoVectors(gravity_imu, -gravity);
     globalState_.qbn_ = q0;
@@ -1224,6 +1258,11 @@ void Initialization(ros::NodeHandle &nh) {
     para_ex[4] = INIT_RBL.y();
     para_ex[5] = INIT_RBL.z();
     para_ex[6] = INIT_RBL.w();
+
+    R_yzx_to_xyz << 0., 0., 1., 1., 0., 0., 0., 1., 0.;
+    R_xyz_to_yzx = R_yzx_to_xyz.transpose();
+    Q_yzx_to_xyz = R_yzx_to_xyz;
+    Q_xyz_to_yzx = R_xyz_to_yzx;
 }
 
 void swapScan() {
@@ -1334,7 +1373,7 @@ int main(int argc, char **argv)
                 filter_->state_.t_ex_ = t_b_l;
                 
                 updatePointCloud();
-                transformFromInertialToLidar();
+                //transformFromInertialToLidar();
 
                 swapScan();
                 scan_new_.reset(new Scan());
@@ -1403,7 +1442,7 @@ int main(int argc, char **argv)
 
                  // transform corner features and plane features to the scan end point
                 updatePointCloud();
-                transformFromInertialToLidar();
+                //transformFromInertialToLidar();
 
                 swapScan();
                 scan_new_.reset(new Scan());

@@ -59,30 +59,16 @@ namespace parameter {
 
 const double G0 = 9.81;
 
-// VLP-16
-const float ang_res_x = 0.2;
-const float ang_res_y = 2.0;
-const float ang_bottom = 15.0 + 0.1;
-const int groundScanInd = 5;
-
-// velodyne HDL-32e
-/*const float ang_res_x = 0.2;
-const float ang_res_y = 1.333;
-const float ang_bottom = 30.67;
-const int groundScanInd = 15;*/
-
-const float sensorMountAngle = 0.0;
-const float segmentTheta = 1.0472;
-const int segmentValidPointNum = 5;
-const int segmentValidLineNum = 3;
-const float segmentAlphaX = ang_res_x / 180.0 * M_PI;
-const float segmentAlphaY = ang_res_y / 180.0 * M_PI;
+const int surroundingKeyframeSearchNum = 50;
+const int historyKeyframeSearchNum = 25;
+const float historyKeyframeFitnessScore = 0.3;
 
 // !@ENABLE_CALIBRATION
 extern int CALIBARTE_IMU;
 
 // !@LIDAR_PARAMETERS
 extern int N_SCANS;
+extern int DOWN_FILTER_SIZE;
 extern int SCAN_NUM;
 extern double SCAN_PERIOD;
 extern double MINIMUM_RANGE;
@@ -115,6 +101,13 @@ extern int PURE_IMU;
 extern int CALIB_EXTRINSIC;
 //extern int EKF_UPDATE;
 extern int OUT_DOOR;
+extern int IMU_DESKEW;
+extern int DISTORTION;
+
+// !@LOOP CLOSURE
+extern int LOOP_CLOSURE_ON;
+extern double LOOP_TIME_THRESHOLD;
+extern float LOOP_SEARCH_RADIUS;
 
 // !@KALMAN_FILTER
 extern double ACC_N;

@@ -24,6 +24,7 @@ int CALIBARTE_IMU;
 
 // !@LIDAR_PARAMETERS
 int N_SCANS;
+int DOWN_FILTER_SIZE;
 int SCAN_NUM;
 double SCAN_PERIOD;
 double MINIMUM_RANGE;
@@ -56,6 +57,13 @@ int PURE_IMU;
 int CALIB_EXTRINSIC;
 //int EKF_UPDATE;
 int OUT_DOOR;
+int IMU_DESKEW;
+int DISTORTION;
+
+// !@LOOP CLOSURE
+int LOOP_CLOSURE_ON;
+double LOOP_TIME_THRESHOLD;
+float LOOP_SEARCH_RADIUS;
 
 // !@KALMAN_FILTER
 double ACC_N;
@@ -103,6 +111,7 @@ void readParameters(ros::NodeHandle& n) {
 
   CALIBARTE_IMU = fsSettings["calibrate_imu"];
   N_SCANS = fsSettings["n_scans"];
+  DOWN_FILTER_SIZE = fsSettings["down_filter_size"];
   SCAN_NUM = fsSettings["scan_num"];
   SCAN_PERIOD = fsSettings["scan_period"];
   MINIMUM_RANGE = fsSettings["minimum_range"];
@@ -127,6 +136,11 @@ void readParameters(ros::NodeHandle& n) {
   CALIB_EXTRINSIC = fsSettings["calib_extrinsic"];
   //EKF_UPDATE = fsSettings["ekf_update"];
   OUT_DOOR = fsSettings["out_door"];
+  IMU_DESKEW = fsSettings["imu_deskew"];
+  DISTORTION = fsSettings["distortion"];
+  LOOP_CLOSURE_ON = fsSettings["loop_closure_on"];
+  LOOP_TIME_THRESHOLD = fsSettings["loop_time_threshold"];
+  LOOP_SEARCH_RADIUS = fsSettings["loop_search_radius"];
 
   fsSettings["imu_topic"] >> IMU_TOPIC;
   fsSettings["lidar_topic"] >> LIDAR_TOPIC;

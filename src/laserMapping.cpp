@@ -641,10 +641,10 @@ void process()
 								point_a = 0.1 * unit_direction + point_on_line;
 								point_b = -0.1 * unit_direction + point_on_line;
 
-								//ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
-								//problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
-								LidarMapEdgeFactor *cost_function = new LidarMapEdgeFactor(curr_point, point_a, point_b);
-								problem.AddResidualBlock(cost_function, loss_function, parameters);
+								ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, point_a, point_b, 1.0);
+								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								//LidarMapEdgeFactor *cost_function = new LidarMapEdgeFactor(curr_point, point_a, point_b);
+								//problem.AddResidualBlock(cost_function, loss_function, parameters);
 								corner_num++;	
 							}							
 						}
@@ -708,10 +708,10 @@ void process()
 							Eigen::Vector3d curr_point(pointOri.x, pointOri.y, pointOri.z);
 							if (planeValid)
 							{
-								//ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
-								//problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
-								LidarMapPlaneNormFactor *cost_function = new LidarMapPlaneNormFactor(curr_point, norm, negative_OA_dot_norm);
-								problem.AddResidualBlock(cost_function, loss_function, parameters);
+								ceres::CostFunction *cost_function = LidarPlaneNormFactor::Create(curr_point, norm, negative_OA_dot_norm);
+								problem.AddResidualBlock(cost_function, loss_function, parameters, parameters + 4);
+								//LidarMapPlaneNormFactor *cost_function = new LidarMapPlaneNormFactor(curr_point, norm, negative_OA_dot_norm);
+								//problem.AddResidualBlock(cost_function, loss_function, parameters);
 								surf_num++;
 							}
 						}

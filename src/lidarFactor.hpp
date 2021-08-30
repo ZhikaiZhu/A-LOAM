@@ -1146,8 +1146,9 @@ class LidarMapEdgeFactor: public ceres::SizedCostFunction<1, 7>
 {
 public:
     LidarMapEdgeFactor(const Eigen::Vector3d &curr_point_, const Eigen::Vector3d &last_point_a_,
-                       const Eigen::Vector3d &last_point_b_): curr_point(curr_point_),
-        last_point_a(last_point_a_), last_point_b(last_point_b_) {}
+                       const Eigen::Vector3d &last_point_b_, const Eigen::Vector3d &t_b_l_,
+                       const Eigen::Quaterniond &q_b_l_): curr_point(curr_point_),
+        last_point_a(last_point_a_), last_point_b(last_point_b_), t_b_l(t_b_l_), q_b_l(q_b_l_) {}
 
     virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
     {
@@ -1158,6 +1159,7 @@ public:
         Eigen::Vector3d lpa = last_point_a;
         Eigen::Vector3d lpb = last_point_b;
 
+        cp = q_b_l * cp + t_b_l;
         Eigen::Matrix<double, 3, 1> lp = q_w_curr * cp + t_w_curr;
 
         Eigen::Matrix<double, 3, 1> nu = (lp - lpa).cross(lp - lpb);
@@ -1197,6 +1199,7 @@ public:
         Eigen::Vector3d lpa = last_point_a;
         Eigen::Vector3d lpb = last_point_b;
 
+        cp = q_b_l * cp + t_b_l;
         Eigen::Matrix<double, 3, 1> lp = q_w_curr * cp + t_w_curr;
 
         Eigen::Matrix<double, 3, 1> nu = (lp - lpa).cross(lp - lpb);
@@ -1237,22 +1240,27 @@ public:
     }
 
     Eigen::Vector3d curr_point, last_point_a, last_point_b;
+    Eigen::Vector3d t_b_l;
+    Eigen::Quaterniond q_b_l;
 };
 
 class LidarMapPlaneNormFactor: public ceres::SizedCostFunction<1, 7>
 {
 public:
     LidarMapPlaneNormFactor(const Eigen::Vector3d &curr_point_, const Eigen::Vector3d &plane_unit_norm_,
-                        double negative_OA_dot_norm_) : curr_point(curr_point_), plane_unit_norm(plane_unit_norm_),
-        negative_OA_dot_norm(negative_OA_dot_norm_) {}
+                        double negative_OA_dot_norm_, const Eigen::Vector3d &t_b_l_,
+                        const Eigen::Quaterniond &q_b_l_) : curr_point(curr_point_), plane_unit_norm(plane_unit_norm_),
+        negative_OA_dot_norm(negative_OA_dot_norm_), t_b_l(t_b_l_), q_b_l(q_b_l_) {}
 
     virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
     {
         Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
         Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
 
+        Eigen::Vector3d cp = curr_point;
         Eigen::Vector3d norm = plane_unit_norm;
-        Eigen::Vector3d point_w = q_w_curr * curr_point + t_w_curr;
+        cp = q_b_l * cp + t_b_l;
+        Eigen::Vector3d point_w = q_w_curr * cp + t_w_curr;
 
         residuals[0] = norm.dot(point_w) + negative_OA_dot_norm;
 
@@ -1261,7 +1269,7 @@ public:
                 Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>> jacobian_pose(jacobians[0]);
                 jacobian_pose.setZero();
                 jacobian_pose.leftCols<3>() = norm.transpose();
-                jacobian_pose.block<1, 3>(0, 3) = -norm.transpose() * utils::skew(q_w_curr * curr_point);
+                jacobian_pose.block<1, 3>(0, 3) = -norm.transpose() * utils::skew(q_w_curr * cp);
             }
         }
         return true;
@@ -1282,8 +1290,10 @@ public:
         Eigen::Vector3d t_w_curr{parameters[0][0], parameters[0][1], parameters[0][2]};
         Eigen::Quaterniond q_w_curr{parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]};
 
+        Eigen::Vector3d cp = curr_point;
         Eigen::Vector3d norm = plane_unit_norm;
-        Eigen::Vector3d point_w = q_w_curr * curr_point + t_w_curr;
+        cp = q_b_l * cp + t_b_l;
+        Eigen::Vector3d point_w = q_w_curr * cp + t_w_curr;
 
         Eigen::Matrix<double, 1, 1> residual;
         residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( norm.dot(point_w) + negative_OA_dot_norm );
@@ -1307,7 +1317,7 @@ public:
                 q_w_curr_new = utils::deltaQ(delta) * q_w_curr_new;
             }
 
-            Eigen::Vector3d point_w = q_w_curr_new * curr_point + t_w_curr_new;
+            Eigen::Vector3d point_w = q_w_curr_new * cp + t_w_curr_new;
 
             Eigen::Matrix<double, 1, 1> tmp_residual;
             tmp_residual.leftCols<1>() = Eigen::Matrix<double, 1, 1>( norm.dot(point_w) + negative_OA_dot_norm );
@@ -1320,4 +1330,6 @@ public:
     Eigen::Vector3d curr_point;
     Eigen::Vector3d plane_unit_norm;
     double negative_OA_dot_norm;
+    Eigen::Vector3d t_b_l;
+    Eigen::Quaterniond q_b_l;
 };

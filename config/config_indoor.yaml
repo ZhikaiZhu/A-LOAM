@@ -17,46 +17,41 @@ map_surr_kf_res: 1.0
 dis_keyframes: 1.0
 ori_keyframes: 20.0
 surrounding_kf_radius: 50.0
-globalmap_kf_radius: 1000.0
+globalmap_kf_radius: 500.0
 skip_frame_num: 1
 icp_freq: 1
 max_lidar_nums: 200000
 num_iter: 4
 lidar_scale: 1
 lidar_std: 0.01
-voxel_size: 0.4
+voxel_size: 0.2
 use_ceres: 1
-loss_threshold: 1.0
+loss_threshold: 0.5
 ceres_max_iter: 2
 save_pcd_map: 0
 pure_imu: 0
 calib_extrinsic: 0
 #ekf_update: 0
-out_door: 1
+out_door: 0
 imu_deskew: 0
-distortion: 1
+distortion: 0
 
 # loop closure
 loop_closure_on: 0
-loop_time_threshold: 60.0
-loop_search_radius: 15.0
+loop_time_threshold: 30.0
+loop_search_radius: 5.0
 
 # topic names
-#imu_topic: "/lips_sim/data_imu"
-#lidar_topic: "/lips_sim/data_cloud"
-imu_topic: "/imu/data"
-lidar_topic: "/velodyne_points"
+imu_topic: "/lips_sim/data_imu"
+lidar_topic: "/lips_sim/data_cloud"
 output_path: "/home/spc/output"
 
 # noice parameters
-#acc_n: 3.9939570888238808e-03
-#gyr_n: 1.5636343949698187e-03
-#acc_w: 6.4356659353532566e-05
-#gyr_w: 3.5640318696367613e-05
-gyr_n: 3.1899505349549957e-03
-gyr_w: 4.9750520483882762e-05
-acc_n: 1.1595553509016745e-02
-acc_w: 1.5395568075735587e-04
+acc_n: 3.9939570888238808e-03
+gyr_n: 1.5636343949698187e-03
+acc_w: 6.4356659353532566e-05
+gyr_w: 3.5640318696367613e-05
+
 
 init_pos_std: !!opencv-matrix
    rows: 3
@@ -80,15 +75,13 @@ init_acc_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: #[0.1, 0.1, 0.1]
-         [0.01, 0.01, 0.02]
+   data: [0.01, 0.01, 0.02]
       
 init_gyr_std: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: #[0.01, 0.01, 0.01]
-         [0.002, 0.002, 0.002]
+   data: [0.002, 0.002, 0.002]
   
 # initial IMU biases
 init_ba: !!opencv-matrix
@@ -108,20 +101,15 @@ init_tbl: !!opencv-matrix
    rows: 3
    cols: 1
    dt: d
-   data: #[-0.5,1.4,1.5]
-         #[0.0, 0.0, 0.0]
-         [0.0071615, -0.0164931, 0.0693814]
+   data: [0.0, 0.0, 0.0]
 
 init_rbl: !!opencv-matrix
    rows: 3
    cols: 3
    dt: d
-   data:  #[1, 0, 0, 
-          # 0, 1, 0, 
-          # 0, 0, 1]
-          [0.998685,   0.0512024,    -0.00266045,
-           -0.0512017, 0.998688,     0.000320176,
-           0.00267335, -0.000183535, 0.999996]
+   data:  [1, 0, 0, 
+           0, 1, 0, 
+           0, 0, 1]
    
 
 
