@@ -1,25 +1,28 @@
 <launch>
     
-    <param name="scan_line" type="int" value="16" />
+    <rosparam command="load" file="$(find aloam_ekf_mapping)/config/params_outdoor.yaml" />
 
-    <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
-    <param name="mapping_skip_frame" type="int" value="1" />
+    <!--- Velodyne_packets to velodyne_points -->
+    <node pkg="velodyne_pointcloud" type="transform_node" name="transform_node">
+      <param name="model" value="32E"/>
+      <remap from="/velodyne_packets" to="/hdl32e_left/velodyne_packets"/>
+      <param name="calibration" value="$(find velodyne_pointcloud)/params/32db.yaml"/>
+      <param name="min_range" value="0.4"/>
+      <param name="max_range" value="130.0"/>
+      <param name="view_direction" value="3.1415926"/>
+      <param name="view_width" value="5.4769"/>
+    </node>
 
-    <!-- remove too closed points -->
-    <param name="minimum_range" type="double" value="0.3"/>
-
-
-    <param name="mapping_line_resolution" type="double" value="0.2"/>
-    <param name="mapping_plane_resolution" type="double" value="0.4"/>
+    <param name="point_filter_num" type="int" value="4"/>
+    <param name="mapping_plane_res" type="double" value="0.5"/>
     <param name="lidar_std" type="double" value="0.01"/>
-    <param name="gyro_noise" type="double" value="0.005"/>
-    <param name="gyro_bias_noise" type="double" value="4e-6"/>
-    <param name="acc_noise" type="double" value="0.01"/>
-    <param name="acc_bias_noise" type="double" value="0.0002"/>
+    <param name="cube_side_length" type="double" value="1000" />
 
-    <node pkg="aloam_ekf_mapping" type="ascanRegistration" name="ascanRegistration" output="screen" />
+    <node pkg="aloam_ekf_mapping" type="pointProcess" name="pointProcess" output="screen" />
 
-    <node pkg="aloam_ekf_mapping" type="ekf_mapping" name="ekf_mapping" output="screen"/>
+    <node pkg="aloam_ekf_mapping" type="ekfMapping" name="ekfMapping" output="screen" />
+
+    <!--<node pkg="aloam_ekf_mapping" type="ekfMapping" name="ekfMapping" output="screen" launch-prefix="xterm -e gdb -ex run args" />-->
 
     <arg name="rviz" default="true" />
     <group if="$(arg rviz)">

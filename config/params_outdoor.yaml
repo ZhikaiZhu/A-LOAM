@@ -1,0 +1,54 @@
+common:
+    lid_topic:  "/velodyne_points"
+    imu_topic:  "/imu/data"
+    
+preprocess:
+    n_scans: 32
+    minimum_range: 4
+    scan_period: 0.1
+
+mapping:
+    undistortion: true
+    loss_threshold: 0.1
+    # lips data
+    #acc_noise: 3.99e-03
+    #gyr_noise: 1.56e-03
+    #acc_bias_noise: 6.44e-05
+    #gyr_bias_noise: 3.56e-05
+    # urban loco and nav data
+    #acc_noise: 8.13e-03
+    #gyr_noise: 7.43e-03
+    #acc_bias_noise: 1.21e-04
+    #gyr_bias_noise: 8.65e-05
+    # utbm data
+    acc_noise: 1.16e-03
+    gyr_noise: 1.19e-02
+    acc_bias_noise: 1.54e-04
+    gyr_bias_noise: 1.98e-06
+    # our data
+    #acc_noise: 1.16e-02
+    #gyr_noise: 3.19e-03
+    #acc_bias_noise: 1.54e-04
+    #gyr_bias_noise: 4.98e-05
+    fov_degree:    180
+    det_range:     100.0
+    extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
+    extrinsic_T: #[0.0, 0.0, 0.0]
+                 #[0.0, 0.0, 0.28]
+                 #[0.0071615, -0.0164931, 0.0693814]
+                 [-0.5, 1.4, 1.5]
+    extrinsic_R: [1, 0, 0,
+                  0, 1, 0,
+                  0, 0, 1]
+                 #[2.67949e-08, 1, 0.0,
+                 # -1, 2.67949e-08, 0.0,
+                 # 0.0, 0.0, 1]
+                 #[0.998685,   0.0512024,    -0.00266045,
+                 # -0.0512017, 0.998688,     0.000320176,
+                 # 0.00267335, -0.000183535, 0.999996]
+
+pcd_save:
+    pcd_save_en: false
+    interval: -1                 # how many LiDAR frames saved in each pcd file; 
+                                 # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+    traj_save_path: /home/spc/output
