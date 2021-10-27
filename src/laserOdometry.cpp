@@ -774,7 +774,7 @@ void transformFromInertialToLidar(){
 
 void calculateRPfromIMU(const V3D& acc, double& roll, double& pitch) {
     pitch = -sign(acc.z()) * asin(acc.x() / G0);
-    //roll = sign(acc.z()) * asin(acc.y() / (G0 * cos(pitch)));
+    //roll = sign(acc.z()) * asin(acc.y() / G0);
     roll = atan(acc.y() / acc.z());
 }
 
@@ -975,7 +975,7 @@ void performIESKF() {
                 }
                 enforceSymmetry(Pk_);
                 //nominalState.boxPlus(errorState, linState_);
-                nominalState.boxPlusInv(errorState, linState_);
+                //nominalState.boxPlusInv(errorState, linState_);
                 filter_->update(linState_, Pk_);
                 filter_->state_.q_ex_ = q_b_l;
                 filter_->state_.t_ex_ = t_b_l;
@@ -1140,16 +1140,19 @@ void initializeGravityAndBias() {
     bw_init_ = sum_angular_vel / imuBuf.size();
     V3D gravity_imu = sum_linear_acc / imuBuf.size();
 
-    double G = gravity_imu.norm();
-    V3D gravity = V3D(0.0, 0.0, -G);
+    double gravity_norm = gravity_imu.norm();
+    V3D gravity(0.0, 0.0, -gravity_norm);
     globalState_.setIdentity();
     globalStateLidar_.setIdentity();
     //globalStateYZX_.setIdentity();
     linState_.setIdentity();
     Q4D q0 = Eigen::Quaterniond::FromTwoVectors(gravity_imu, -gravity);
+    //ba_init_ = gravity_imu - q0.inverse() * gravity;
     globalState_.qbn_ = q0;
     globalState_.bw_ = bw_init_;
+    //globalState_.ba_ = ba_init_;
     linState_.bw_ = bw_init_;
+    //linState_.ba_ = ba_init_;
     std::cout<< "System Initialization Succeeded !!!" << std::endl;
 }
 

@@ -398,17 +398,17 @@ public:
                         }
                     }
                 }
-            }
-            float diffX2 = laserCloud->points[i].x - laserCloud->points[i - 1].x;
-            float diffY2 = laserCloud->points[i].y - laserCloud->points[i - 1].y;
-            float diffZ2 = laserCloud->points[i].z - laserCloud->points[i - 1].z;
-            float diff2 = diffX2 * diffX2 + diffY2 * diffY2 + diffZ2 * diffZ2;
-            float dis = laserCloud->points[i].x * laserCloud->points[i].x + 
-                        laserCloud->points[i].y * laserCloud->points[i].y + 
-                        laserCloud->points[i].z * laserCloud->points[i].z;
-            
-            if (diff1 > 0.0002 * dis && diff2 > 0.0002 * dis) {
-                cloudNeighborPicked[i] = 1;
+                float diffX2 = laserCloud->points[i].x - laserCloud->points[i - 1].x;
+                float diffY2 = laserCloud->points[i].y - laserCloud->points[i - 1].y;
+                float diffZ2 = laserCloud->points[i].z - laserCloud->points[i - 1].z;
+                float diff2 = diffX2 * diffX2 + diffY2 * diffY2 + diffZ2 * diffZ2;
+                float dis = laserCloud->points[i].x * laserCloud->points[i].x + 
+                            laserCloud->points[i].y * laserCloud->points[i].y + 
+                            laserCloud->points[i].z * laserCloud->points[i].z;
+                
+                if (diff1 > 0.0002 * dis && diff2 > 0.0002 * dis) {
+                    cloudNeighborPicked[i] = 1;
+                }
             }
         }
 
